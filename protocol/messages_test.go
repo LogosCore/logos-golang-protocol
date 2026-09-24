@@ -40,18 +40,27 @@ func TestValidateInbound_InvalidTimestamp(t *testing.T) {
 
 func TestValidateOutbound_InvalidType(t *testing.T) {
 	msg := validOutboundMessage()
-	msg.Type = TypeInboundAgentMessage
+	msg.Type = TypeInboundMinionMessage
 
 	err := ValidateOutbound(msg)
 	assertValidationCode(t, err, ErrCodeInvalidType)
 }
 
-func TestValidateOutbound_MissingSourceField(t *testing.T) {
+func TestValidateOutbound_MissingEncryptedData(t *testing.T) {
 	msg := validOutboundMessage()
-	msg.Source.Tenant = ""
+	msg.EncryptedData = ""
 
 	err := ValidateOutbound(msg)
 	assertValidationCode(t, err, ErrCodeMissingField)
+}
+
+// Outbound deliberately carries no source; validation must accept its absence.
+func TestValidateOutbound_NoSourceRequired(t *testing.T) {
+	msg := validOutboundMessage()
+
+	if err := ValidateOutbound(msg); err != nil {
+		t.Fatalf("ValidateOutbound() error = %v, want nil (outbound has no source)", err)
+	}
 }
 
 func assertValidationCode(t *testing.T, err error, wantCode string) {
@@ -70,19 +79,19 @@ func assertValidationCode(t *testing.T, err error, wantCode string) {
 	}
 }
 
-func validInboundMessage() InboundAgentMessage {
-	return InboundAgentMessage{
+func validInboundMessage() InboundMinionMessage {
+	return InboundMinionMessage{
 		MessageID: "msg-in-1",
-		Type:      TypeInboundAgentMessage,
+		Type:      TypeInboundMinionMessage,
 		Version:   VersionV1,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Source: SourceInfo{
-			Module:         "agent",
-			ModuleInstance: "agent-1",
+			Module:         "channel-http",
+			ModuleInstance: "channel-http-1",
 			Transport:      "ws",
 			Tenant:         "default",
 		},
-		ID:            "agent-123",
+		ID:            "s-2b77df",
 		EncryptedData: "ciphertext",
 		Meta: MessageMeta{
 			"trace_id": "trace-1",
@@ -90,19 +99,13 @@ func validInboundMessage() InboundAgentMessage {
 	}
 }
 
-func validOutboundMessage() OutboundAgentMessage {
-	return OutboundAgentMessage{
-		MessageID: "msg-out-1",
-		Type:      TypeOutboundAgentMessage,
-		Version:   VersionV1,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Source: SourceInfo{
-			Module:         "logos",
-			ModuleInstance: "logos-1",
-			Transport:      "ws",
-			Tenant:         "default",
-		},
-		ID:            "agent-123",
+func validOutboundMessage() OutboundMinionMessage {
+	return OutboundMinionMessage{
+		MessageID:     "msg-out-1",
+		Type:          TypeOutboundMinionMessage,
+		Version:       VersionV1,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		ID:            "s-2b77df",
 		EncryptedData: "ciphertext",
 		Meta: MessageMeta{
 			"trace_id": "trace-2",
