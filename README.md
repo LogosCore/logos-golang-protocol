@@ -1,6 +1,7 @@
 # logos-golang-protocol
 
-Shared Go protocol contracts for Logos.
+Shared Go protocol contracts for Logos: the canonical data-plane minion messages
+and the control-plane AMQP envelope, with validation helpers and typed errors.
 
 ## Install
 
@@ -10,44 +11,18 @@ go get github.com/logoscore/logos-golang-protocol@latest
 
 ## Quick Usage
 
-```go
-package main
+Runnable examples live in [`protocol/example_test.go`](protocol/example_test.go)
+and are compiled and executed by `go test ./...`, so they cannot drift from the
+API:
 
-import (
-	"errors"
-	"fmt"
-	"time"
-
-	"github.com/logoscore/logos-golang-protocol/protocol"
-)
-
-func main() {
-	msg := protocol.InboundMinionMessage{
-		MessageID: protocol.NewULID(),
-		Type:      protocol.TypeInboundMinionMessage,
-		Version:   protocol.VersionV1,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Source: protocol.SourceInfo{
-			Module:         "http-channel",
-			ModuleInstance: "http-channel-1",
-			Transport:      "http",
-			Tenant:         "default",
-		},
-		ID:            "minion-123",
-		EncryptedData: "base64-or-ciphertext",
-		Meta: protocol.MessageMeta{
-			"trace_id": "trace-1",
-		},
-	}
-
-	if err := protocol.ValidateInbound(msg); err != nil {
-		var vErr *protocol.ValidationError
-		if errors.As(err, &vErr) {
-			fmt.Printf("validation failed: code=%s message=%s\n", vErr.Code, vErr.Message)
-		}
-	}
-}
+```bash
+go test -run Example -v ./protocol
 ```
 
-`OutboundMinionMessage` (core's reply, validated with `ValidateOutbound`) carries no
-`Source`: it answers an existing `id`.
+- `ExampleValidateInbound` — build an `InboundMinionMessage` the way a channel
+  module does, validate it, and read the typed `*ValidationError` code when a
+  field is missing.
+- `ExampleValidateOutbound` — core's reply. `OutboundMinionMessage` carries no
+  `Source`: it answers an existing `id`.
+
+Full API reference: [pkg.go.dev](https://pkg.go.dev/github.com/logoscore/logos-golang-protocol/protocol).
