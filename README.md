@@ -22,18 +22,18 @@ import (
 )
 
 func main() {
-	msg := protocol.InboundAgentMessage{
-		MessageID: "msg-001",
-		Type:      protocol.TypeInboundAgentMessage,
+	msg := protocol.InboundMinionMessage{
+		MessageID: protocol.NewULID(),
+		Type:      protocol.TypeInboundMinionMessage,
 		Version:   protocol.VersionV1,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Source: protocol.SourceInfo{
-			Module:         "agent",
-			ModuleInstance: "agent-1",
-			Transport:      "ws",
+			Module:         "http-channel",
+			ModuleInstance: "http-channel-1",
+			Transport:      "http",
 			Tenant:         "default",
 		},
-		ID:            "agent-123",
+		ID:            "minion-123",
 		EncryptedData: "base64-or-ciphertext",
 		Meta: protocol.MessageMeta{
 			"trace_id": "trace-1",
@@ -48,3 +48,6 @@ func main() {
 	}
 }
 ```
+
+`OutboundMinionMessage` (core's reply, validated with `ValidateOutbound`) carries no
+`Source`: it answers an existing `id`.
