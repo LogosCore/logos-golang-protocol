@@ -127,7 +127,9 @@ type LogsStopRequest struct {
 	StreamID string `json:"stream_id"`
 }
 
-// LogRecord is one log line.
+// LogRecord is one log line. Attrs is the module's own structure, nested
+// objects included; core and the UI show it as is and never interpret keys.
+// MaxLogAttrs bounds the number of leaf values.
 type LogRecord struct {
 	Time    time.Time      `json:"time"`
 	Level   LogLevel       `json:"level"`
