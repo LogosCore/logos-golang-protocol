@@ -68,7 +68,7 @@ const (
 	MaxLogLeaseSeconds     = 120
 	MaxLogBacklog          = 1000
 	MaxLogMessageBytes     = 8 << 10
-	MaxLogAttrs            = 32
+	MaxLogAttrs            = 128
 	MaxLogBatchRecords     = 500
 )
 
