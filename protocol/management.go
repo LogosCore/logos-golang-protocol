@@ -71,6 +71,9 @@ const (
 type EnumOption struct {
 	Value string `json:"value"`
 	Label string `json:"label,omitempty"`
+	// Description says what choosing this option does; shown under the label
+	// in the option list.
+	Description string `json:"description,omitempty"`
 }
 
 // FieldSpec describes a typed value plus its constraints and UI hints. It is
@@ -332,6 +335,11 @@ func validateFieldSpec(f FieldSpec) error {
 	}
 	if f.Type == FieldEnum && (len(f.Options) == 0 || len(f.Options) > MaxEnumOptions) {
 		return fmt.Errorf("enum needs 1..%d options", MaxEnumOptions)
+	}
+	for _, o := range f.Options {
+		if err := validateText(o.Label, o.Description); err != nil {
+			return fmt.Errorf("option %q: %w", o.Value, err)
+		}
 	}
 	if f.Pattern != "" {
 		if _, err := regexp.Compile(f.Pattern); err != nil {

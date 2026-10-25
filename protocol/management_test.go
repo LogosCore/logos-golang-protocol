@@ -109,3 +109,19 @@ func TestValidateValue(t *testing.T) {
 		}
 	}
 }
+
+func TestEnumOptionDescription(t *testing.T) {
+	enum := func(desc string) ManagementManifest {
+		return ManagementManifest{SchemaVersion: ManagementSchemaV1, Properties: []PropertySpec{{
+			FieldSpec: FieldSpec{Key: "level", Type: FieldEnum, Label: "Level",
+				Options: []EnumOption{{Value: "warn", Label: "Warn", Description: desc}}},
+			Apply: ApplyLive,
+		}}}
+	}
+	if err := ValidateManifest(enum("Core problems only.")); err != nil {
+		t.Fatalf("valid description: %v", err)
+	}
+	if err := ValidateManifest(enum(strings.Repeat("x", MaxDescriptionLength+1))); err == nil {
+		t.Fatal("over-long option description accepted")
+	}
+}
