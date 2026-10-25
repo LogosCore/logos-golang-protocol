@@ -131,6 +131,19 @@ type ManagementManifest struct {
 	Properties    []PropertySpec `json:"properties,omitempty"`
 	Actions       []ActionSpec   `json:"actions,omitempty"`
 	Status        []StatusSpec   `json:"status,omitempty"`
+	// Capabilities lists optional management features the module serves
+	// (e.g. CapabilityLogs). Unknown values are ignored.
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// Has reports whether the manifest declares capability c.
+func (m ManagementManifest) Has(c string) bool {
+	for _, x := range m.Capabilities {
+		if x == c {
+			return true
+		}
+	}
+	return false
 }
 
 // ManagementConfig is the effective config core hands a module: in the
@@ -197,6 +210,7 @@ const (
 	MaxManifestProperties = 64
 	MaxManifestActions    = 32
 	MaxManifestStatus     = 64
+	MaxCapabilities       = 16
 	MaxActionParams       = 16
 	MaxEnumOptions        = 64
 	MaxLabelLength        = 120
@@ -225,6 +239,9 @@ func ValidateManifest(m ManagementManifest) error {
 	}
 	if len(m.Status) > MaxManifestStatus {
 		return fmt.Errorf("too many status values (%d > %d)", len(m.Status), MaxManifestStatus)
+	}
+	if len(m.Capabilities) > MaxCapabilities {
+		return fmt.Errorf("too many capabilities (%d > %d)", len(m.Capabilities), MaxCapabilities)
 	}
 
 	seen := map[string]bool{}
