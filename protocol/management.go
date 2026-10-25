@@ -126,6 +126,11 @@ type StatusSpec struct {
 	Label       string    `json:"label,omitempty"`
 	Description string    `json:"description,omitempty"`
 	Unit        string    `json:"unit,omitempty"`
+	// Alert is the value that needs an operator's attention (e.g. true for a
+	// "draining" flag). Core cannot know which value of a module's status is
+	// bad, so the module says so; the UI highlights a matching value and shows
+	// any other as normal. Only for bool, enum and string. Optional.
+	Alert any `json:"alert,omitempty"`
 }
 
 // ManagementManifest is declared by a module in module.register under
@@ -309,6 +314,20 @@ func ValidateManifest(m ManagementManifest) error {
 		}
 		if err := validateText(s.Label, s.Description); err != nil {
 			return fmt.Errorf("status %q: %w", s.Key, err)
+		}
+		if s.Alert != nil {
+			var ok bool
+			switch s.Type {
+			case FieldBool:
+				_, ok = s.Alert.(bool)
+			case FieldEnum, FieldString:
+				_, ok = s.Alert.(string)
+			default:
+				return fmt.Errorf("status %q: alert is only for bool, enum and string", s.Key)
+			}
+			if !ok {
+				return fmt.Errorf("status %q: alert must be a %s value", s.Key, s.Type)
+			}
 		}
 	}
 	return nil

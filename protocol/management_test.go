@@ -156,3 +156,28 @@ func TestValidateValueIntRange(t *testing.T) {
 		t.Errorf("large exact int refused: %v", err)
 	}
 }
+
+func TestStatusAlert(t *testing.T) {
+	m := func(s StatusSpec) ManagementManifest {
+		return ManagementManifest{SchemaVersion: ManagementSchemaV1, Status: []StatusSpec{s}}
+	}
+	for _, ok := range []StatusSpec{
+		{Key: "draining", Type: FieldBool, Alert: true},
+		{Key: "mode", Type: FieldEnum, Alert: "degraded"},
+		{Key: "phase", Type: FieldString, Alert: "stuck"},
+		{Key: "plain", Type: FieldBool},
+	} {
+		if err := ValidateManifest(m(ok)); err != nil {
+			t.Errorf("%s: %v", ok.Key, err)
+		}
+	}
+	for _, bad := range []StatusSpec{
+		{Key: "draining", Type: FieldBool, Alert: "yes"},
+		{Key: "count", Type: FieldInt, Alert: 0},
+		{Key: "mode", Type: FieldEnum, Alert: 1},
+	} {
+		if err := ValidateManifest(m(bad)); err == nil {
+			t.Errorf("%s: alert %v accepted", bad.Key, bad.Alert)
+		}
+	}
+}
