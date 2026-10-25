@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -399,8 +400,10 @@ func ValidateValue(f FieldSpec, v any) error {
 		if !ok {
 			return fmt.Errorf("must be a number")
 		}
-		if f.Type != FieldNumber && n != math.Trunc(n) {
-			return fmt.Errorf("must be an integer")
+		if f.Type != FieldNumber {
+			if _, ok := AsInt64(v); !ok {
+				return fmt.Errorf("must be an integer within int64 range")
+			}
 		}
 		if f.Type == FieldBytes && n < 0 {
 			return fmt.Errorf("must not be negative")
@@ -460,7 +463,7 @@ func validateString(f FieldSpec, s string) error {
 		return fmt.Errorf("value is required")
 	}
 	if f.Pattern != "" {
-		re, err := regexp.Compile(f.Pattern)
+		re, err := compilePattern(f.Pattern)
 		if err != nil {
 			return fmt.Errorf("invalid pattern: %w", err)
 		}
@@ -521,9 +524,39 @@ func ParseDuration(v any) (time.Duration, error) { return toDuration(v) }
 
 // AsInt64 converts a numeric value as validated by ValidateValue.
 func AsInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case json.Number:
+		// Exact for integers beyond float64's 2^53.
+		if i, err := n.Int64(); err == nil {
+			return i, true
+		}
+	}
 	f, ok := toFloat(v)
-	if !ok || f != math.Trunc(f) {
+	// 2^63 itself does not fit; float64 cannot say 2^63-1.
+	if !ok || f != math.Trunc(f) || f < -(1<<63) || f >= 1<<63 {
 		return 0, false
 	}
 	return int64(f), true
+}
+
+// patterns caches compiled FieldSpec patterns: a manifest's few patterns are
+// checked on every config apply and action call.
+var patterns sync.Map // string -> *regexp.Regexp
+
+func compilePattern(p string) (*regexp.Regexp, error) {
+	if re, ok := patterns.Load(p); ok {
+		return re.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(p)
+	if err != nil {
+		return nil, err
+	}
+	patterns.Store(p, re)
+	return re, nil
 }

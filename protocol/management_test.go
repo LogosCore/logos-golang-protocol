@@ -125,3 +125,34 @@ func TestEnumOptionDescription(t *testing.T) {
 		t.Fatal("over-long option description accepted")
 	}
 }
+
+func TestAsInt64(t *testing.T) {
+	for _, c := range []struct {
+		in   any
+		want int64
+		ok   bool
+	}{
+		{json.Number("9007199254740993"), 9007199254740993, true}, // beyond 2^53: exact
+		{float64(42), 42, true},
+		{int64(-7), -7, true},
+		{1.5, 0, false},
+		{1e19, 0, false}, // out of int64 range: refused, not wrapped
+		{json.Number("1e19"), 0, false},
+		{"5", 0, false},
+	} {
+		got, ok := AsInt64(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("AsInt64(%v) = %d, %v; want %d, %v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestValidateValueIntRange(t *testing.T) {
+	f := FieldSpec{Key: "n", Type: FieldInt, Label: "N"}
+	if err := ValidateValue(f, 1e19); err == nil {
+		t.Error("1e19 accepted for an int without max")
+	}
+	if err := ValidateValue(f, json.Number("9007199254740993")); err != nil {
+		t.Errorf("large exact int refused: %v", err)
+	}
+}
