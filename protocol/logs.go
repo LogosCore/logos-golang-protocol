@@ -68,8 +68,11 @@ const (
 	MaxLogLeaseSeconds     = 120
 	MaxLogBacklog          = 1000
 	MaxLogMessageBytes     = 8 << 10
-	MaxLogAttrs            = 128
-	MaxLogBatchRecords     = 500
+	// MaxLogValueBytes caps one attr value (a string, or the JSON of a
+	// structured value); longer ones are truncated.
+	MaxLogValueBytes   = 4 << 10
+	MaxLogAttrs        = 128
+	MaxLogBatchRecords = 500
 )
 
 // Stream end reasons (LogBatch.EndReason).
@@ -138,7 +141,9 @@ type LogRecord struct {
 }
 
 // LogBatch is what a module publishes to LogsExchange. Seq increases by one
-// per batch of a stream, so a gap means batches were lost in transit.
+// per batch of a stream, so a gap means batches were lost in transit. Seq
+// starts again at 1 when the module recreates the stream (a start for an id
+// it no longer has: after a reconnect or an ended lease).
 // Dropped counts records the module discarded (rate limit or slow publish)
 // since the previous batch. The last batch of a stream has End set.
 type LogBatch struct {
