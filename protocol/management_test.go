@@ -181,3 +181,58 @@ func TestStatusAlert(t *testing.T) {
 		}
 	}
 }
+
+func TestStringMap(t *testing.T) {
+	f := FieldSpec{Key: "headers", Type: FieldStringMap, KeyPattern: `^[A-Za-z-]+$`, Pattern: `^[^\r\n]*$`, MaxLength: 8, MaxItems: 2}
+	if err := validateFieldSpec(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateValue(f, map[string]any{"X-A": "1", "X-B": "two"}); err != nil {
+		t.Errorf("valid map: %v", err)
+	}
+	if err := ValidateValue(f, map[string]string{"X-A": "1"}); err != nil {
+		t.Errorf("map[string]string: %v", err)
+	}
+	for name, v := range map[string]any{
+		"not an object": []any{"X-A: 1"},
+		"non-string":    map[string]any{"X-A": 1},
+		"bad key":       map[string]any{"X A": "1"},
+		"empty key":     map[string]any{"": "1"},
+		"bad value":     map[string]any{"X-A": "a\nb"},
+		"long value":    map[string]any{"X-A": "123456789"},
+		"too many":      map[string]any{"A": "1", "B": "2", "C": "3"},
+	} {
+		if err := ValidateValue(f, v); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	for name, bad := range map[string]FieldSpec{
+		"key_pattern on a list": {Key: "l", Type: FieldStringList, KeyPattern: "x"},
+		"bad key_pattern":       {Key: "m", Type: FieldStringMap, KeyPattern: "("},
+		"max_items on a string": {Key: "s", Type: FieldString, MaxItems: 2},
+	} {
+		if err := validateFieldSpec(bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	list := FieldSpec{Key: "l", Type: FieldStringList, MaxItems: 1}
+	if err := ValidateValue(list, []any{"a", "b"}); err == nil {
+		t.Error("string_list over max_items accepted")
+	}
+}
+
+func TestFieldFormat(t *testing.T) {
+	if err := validateFieldSpec(FieldSpec{Key: "ua", Type: FieldString, Format: FormatUserAgent}); err != nil {
+		t.Errorf("user_agent format: %v", err)
+	}
+	for name, f := range map[string]FieldSpec{
+		"on an int":  {Key: "n", Type: FieldInt, Format: FormatUserAgent},
+		"bad format": {Key: "s", Type: FieldString, Format: "User Agent"},
+	} {
+		if err := validateFieldSpec(f); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

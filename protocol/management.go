@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 )
@@ -48,6 +49,7 @@ const (
 	FieldURL        FieldType = "url"         // absolute URL string
 	FieldSecret     FieldType = "secret"      // write-only string; never echoed back
 	FieldStringList FieldType = "string_list" // JSON array of strings
+	FieldStringMap  FieldType = "string_map"  // JSON object of string keys to string values
 )
 
 // ApplyMode says whether a property change takes effect immediately or only
@@ -77,27 +79,40 @@ type EnumOption struct {
 	Description string `json:"description,omitempty"`
 }
 
+// Field formats: what a string field holds, beyond its type. A UI hint only
+// (never validated): the UI may offer a helper for it, e.g. a generator.
+const (
+	FormatUserAgent = "user_agent" // an HTTP User-Agent string
+)
+
 // FieldSpec describes a typed value plus its constraints and UI hints. It is
 // shared by properties and action parameters.
 //
 // Min and Max are numbers for int/number/bytes, duration strings for duration,
-// and ignored otherwise.
+// and ignored otherwise. For string_list and string_map, Pattern and MaxLength
+// apply to each item (each value of a map), KeyPattern to each map key, and
+// MaxItems bounds the number of items or entries.
 type FieldSpec struct {
-	Key         string       `json:"key"`
-	Type        FieldType    `json:"type"`
-	Label       string       `json:"label,omitempty"`
-	Description string       `json:"description,omitempty"`
-	Group       string       `json:"group,omitempty"`
-	Order       int          `json:"order,omitempty"`
-	Unit        string       `json:"unit,omitempty"`
-	Placeholder string       `json:"placeholder,omitempty"`
-	Required    bool         `json:"required,omitempty"`
-	Default     any          `json:"default,omitempty"`
-	Min         any          `json:"min,omitempty"`
-	Max         any          `json:"max,omitempty"`
-	Pattern     string       `json:"pattern,omitempty"`
-	MaxLength   int          `json:"max_length,omitempty"`
-	Options     []EnumOption `json:"options,omitempty"`
+	Key         string    `json:"key"`
+	Type        FieldType `json:"type"`
+	Label       string    `json:"label,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Group       string    `json:"group,omitempty"`
+	Order       int       `json:"order,omitempty"`
+	Unit        string    `json:"unit,omitempty"`
+	Placeholder string    `json:"placeholder,omitempty"`
+	// Format is what a string field holds (FormatUserAgent, ...): a UI hint,
+	// never validated. Unknown formats are ignored.
+	Format     string       `json:"format,omitempty"`
+	Required   bool         `json:"required,omitempty"`
+	Default    any          `json:"default,omitempty"`
+	Min        any          `json:"min,omitempty"`
+	Max        any          `json:"max,omitempty"`
+	Pattern    string       `json:"pattern,omitempty"`
+	MaxLength  int          `json:"max_length,omitempty"`
+	KeyPattern string       `json:"key_pattern,omitempty"`
+	MaxItems   int          `json:"max_items,omitempty"`
+	Options    []EnumOption `json:"options,omitempty"`
 }
 
 // PropertySpec is a manageable property. Default is the module's own effective
@@ -232,6 +247,7 @@ var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 var fieldTypes = map[FieldType]bool{
 	FieldString: true, FieldInt: true, FieldNumber: true, FieldBool: true, FieldEnum: true,
 	FieldDuration: true, FieldBytes: true, FieldURL: true, FieldSecret: true, FieldStringList: true,
+	FieldStringMap: true,
 }
 
 // ValidateManifest checks a manifest's structure, limits, and that every
@@ -353,6 +369,9 @@ func validateFieldSpec(f FieldSpec) error {
 	if err := validateText(f.Label, f.Description); err != nil {
 		return err
 	}
+	if f.Format != "" && (f.Type != FieldString || !keyPattern.MatchString(f.Format)) {
+		return fmt.Errorf("format is a lowercase name, only for string")
+	}
 	if f.Type == FieldEnum && (len(f.Options) == 0 || len(f.Options) > MaxEnumOptions) {
 		return fmt.Errorf("enum needs 1..%d options", MaxEnumOptions)
 	}
@@ -365,6 +384,17 @@ func validateFieldSpec(f FieldSpec) error {
 		if _, err := regexp.Compile(f.Pattern); err != nil {
 			return fmt.Errorf("invalid pattern: %w", err)
 		}
+	}
+	if f.KeyPattern != "" {
+		if f.Type != FieldStringMap {
+			return fmt.Errorf("key_pattern is only for string_map")
+		}
+		if _, err := regexp.Compile(f.KeyPattern); err != nil {
+			return fmt.Errorf("invalid key_pattern: %w", err)
+		}
+	}
+	if f.MaxItems < 0 || (f.MaxItems > 0 && f.Type != FieldStringList && f.Type != FieldStringMap) {
+		return fmt.Errorf("max_items is a positive count, only for string_list and string_map")
 	}
 	switch f.Type {
 	case FieldInt, FieldNumber, FieldBytes:
@@ -459,6 +489,9 @@ func ValidateValue(f FieldSpec, v any) error {
 				return fmt.Errorf("must be a list of strings")
 			}
 		}
+		if f.MaxItems > 0 && len(items) > f.MaxItems {
+			return fmt.Errorf("at most %d items", f.MaxItems)
+		}
 		for i, it := range items {
 			s, ok := it.(string)
 			if !ok {
@@ -466,6 +499,42 @@ func ValidateValue(f FieldSpec, v any) error {
 			}
 			if err := validateString(f, s); err != nil {
 				return fmt.Errorf("item %d: %w", i, err)
+			}
+		}
+	case FieldStringMap:
+		entries, ok := v.(map[string]any)
+		if !ok {
+			if sm, ok2 := v.(map[string]string); ok2 {
+				entries = make(map[string]any, len(sm))
+				for k, s := range sm {
+					entries[k] = s
+				}
+			} else {
+				return fmt.Errorf("must be an object of strings")
+			}
+		}
+		if f.MaxItems > 0 && len(entries) > f.MaxItems {
+			return fmt.Errorf("at most %d entries", f.MaxItems)
+		}
+		for _, k := range sortedKeys(entries) {
+			if k == "" {
+				return fmt.Errorf("keys must not be empty")
+			}
+			if f.KeyPattern != "" {
+				re, err := compilePattern(f.KeyPattern)
+				if err != nil {
+					return fmt.Errorf("invalid key_pattern: %w", err)
+				}
+				if !re.MatchString(k) {
+					return fmt.Errorf("key %q must match %s", k, f.KeyPattern)
+				}
+			}
+			s, ok := entries[k].(string)
+			if !ok {
+				return fmt.Errorf("%q must be a string", k)
+			}
+			if err := validateString(f, s); err != nil {
+				return fmt.Errorf("%q: %w", k, err)
 			}
 		}
 	default:
@@ -505,6 +574,17 @@ func validateString(f FieldSpec, s string) error {
 		return fmt.Errorf("must be one of the declared options")
 	}
 	return nil
+}
+
+// sortedKeys orders map keys, so a map's first problem is reported the same
+// way every time.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func toFloat(v any) (float64, bool) {
