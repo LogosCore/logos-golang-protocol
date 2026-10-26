@@ -32,6 +32,9 @@ const (
 	CodeNotFound     = "not_found"
 	CodeConflict     = "conflict"
 	CodeActionFailed = "action_failed"
+	// CodeActionUnavailable refuses an action whose available_when does not
+	// hold; the message says why.
+	CodeActionUnavailable = "action_unavailable"
 )
 
 // FieldType is the value type of a property, action parameter, or status value.
@@ -142,6 +145,9 @@ type ActionSpec struct {
 	Confirm        string      `json:"confirm,omitempty"` // confirmation prompt shown before invoking
 	Params         []FieldSpec `json:"params,omitempty"`
 	TimeoutSeconds int         `json:"timeout_seconds,omitempty"`
+	// AvailableWhen are the conditions the action is available under, all
+	// of which must hold (see ActionAvailable). Optional.
+	AvailableWhen []ActionCondition `json:"available_when,omitempty"`
 }
 
 // StatusSpec describes a read-only status value the module reports in its
@@ -253,6 +259,8 @@ const (
 	MaxActionTimeout      = 60 // seconds
 	MaxAcceptEntries      = 32 // file: accepted extensions and media types
 	MaxFileIDLength       = 128
+	MaxActionConditions   = 8
+	MaxConditionValues    = 64 // values of an "in" condition
 )
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -364,6 +372,12 @@ func ValidateManifest(m ManagementManifest) error {
 			if !ok {
 				return fmt.Errorf("status %q: alert must be a %s value", s.Key, s.Type)
 			}
+		}
+	}
+
+	for _, a := range m.Actions {
+		if err := validateConditions(m, a.AvailableWhen); err != nil {
+			return fmt.Errorf("action %q: %w", a.Name, err)
 		}
 	}
 	return nil
