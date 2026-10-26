@@ -22,9 +22,9 @@ const EnvelopeVersionV1 = "1.0"
 
 // Service identifiers for Envelope.Source.Service.
 const (
-	ServiceCore          = "core"
-	ServiceChannel       = "channel"
-	ServiceMinionFactory = "minion-factory"
+	ServiceCore    = "core"
+	ServiceChannel = "channel"
+	ServiceFactory = "factory"
 )
 
 // RPC reply status values.
@@ -47,7 +47,7 @@ const (
 const timestampFormat = "2006-01-02T15:04:05.000Z07:00"
 
 // Source is the origin descriptor on a control-plane envelope: the service kind
-// (core / channel / minion-factory) and the deployment instance id.
+// (core / channel / factory) and the deployment instance id.
 type Source struct {
 	Service  string `json:"service"`
 	Instance string `json:"instance"`
