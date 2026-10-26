@@ -18,6 +18,10 @@ import (
 // ConnectionSchemaV1 is the current connection schema format version.
 const ConnectionSchemaV1 = "1"
 
+// RegisterFieldConnection is the module.register key a channel declares its
+// connection schema under.
+const RegisterFieldConnection = "connection"
+
 // MaxConnectionFields bounds a connection schema.
 const MaxConnectionFields = 32
 
@@ -77,45 +81,13 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 // problems by key (nil when there are none); an undeclared key is reported
 // under its own name.
 func ValidateConnectionValues(s ConnectionSchema, values map[string]any) map[string]string {
-	var problems map[string]string
-	add := func(key, reason string) {
-		if problems == nil {
-			problems = map[string]string{}
-		}
-		problems[key] = reason
-	}
-	for key := range values {
-		if _, ok := s.Field(key); !ok {
-			add(key, "not a field of this channel's connection schema")
-		}
-	}
-	for _, f := range s.Fields {
-		v, ok := values[f.Key]
-		if !ok || v == nil {
-			if f.Required && f.Default == nil {
-				add(f.Key, "value is required")
-			}
-			continue
-		}
-		if err := ValidateValue(f, v); err != nil {
-			add(f.Key, err.Error())
-		}
-	}
-	return problems
+	return validateValues(s.Fields, values, "not a field of this channel's connection schema")
 }
 
 // ResolveConnectionValues is what a minion is given: values over the schema's
 // defaults, for declared fields only. Fields with neither are left out.
 func ResolveConnectionValues(s ConnectionSchema, values map[string]any) map[string]any {
-	out := make(map[string]any, len(s.Fields))
-	for _, f := range s.Fields {
-		if v, ok := values[f.Key]; ok && v != nil {
-			out[f.Key] = v
-		} else if f.Default != nil {
-			out[f.Key] = f.Default
-		}
-	}
-	return out
+	return ResolveFieldValues(s.Fields, values)
 }
 
 // SortedProblemKeys returns the keys of a problems map in a stable order, for

@@ -2,6 +2,10 @@
 
 Shared Go protocol contracts for Logos: the canonical data-plane minion messages
 and the control-plane AMQP envelope, with validation helpers and typed errors.
+It also holds what modules declare at registration and the operations that
+follow: the management manifest, live log streaming, a channel's minion
+connection schema, and a factory's build schema with the build operations
+(`factory.build`, `.cancel`, `.progress`, `.result`).
 
 ## Install
 

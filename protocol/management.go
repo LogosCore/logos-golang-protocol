@@ -50,6 +50,9 @@ const (
 	FieldSecret     FieldType = "secret"      // write-only string; never echoed back
 	FieldStringList FieldType = "string_list" // JSON array of strings
 	FieldStringMap  FieldType = "string_map"  // JSON object of string keys to string values
+	FieldDatetime   FieldType = "datetime"    // RFC 3339 timestamp string
+	FieldEnumList   FieldType = "enum_list"   // JSON array of distinct option values
+	FieldFile       FieldType = "file"        // a build file's id; build schemas only
 )
 
 // ApplyMode says whether a property change takes effect immediately or only
@@ -86,12 +89,14 @@ const (
 )
 
 // FieldSpec describes a typed value plus its constraints and UI hints. It is
-// shared by properties and action parameters.
+// shared by properties, action parameters, connection schemas and build
+// schemas.
 //
 // Min and Max are numbers for int/number/bytes, duration strings for duration,
-// and ignored otherwise. For string_list and string_map, Pattern and MaxLength
-// apply to each item (each value of a map), KeyPattern to each map key, and
-// MaxItems bounds the number of items or entries.
+// RFC 3339 strings for datetime, and ignored otherwise. For string_list and
+// string_map, Pattern and MaxLength apply to each item (each value of a map),
+// KeyPattern to each map key, and MaxItems bounds the number of items or
+// entries (of enum_list too).
 type FieldSpec struct {
 	Key         string    `json:"key"`
 	Type        FieldType `json:"type"`
@@ -113,6 +118,12 @@ type FieldSpec struct {
 	KeyPattern string       `json:"key_pattern,omitempty"`
 	MaxItems   int          `json:"max_items,omitempty"`
 	Options    []EnumOption `json:"options,omitempty"`
+	// Accept and MaxSize are for file: the extensions (".ico") or media
+	// types ("image/x-icon", "image/*") a file may have, any when empty, and
+	// its largest size in bytes, no limit when 0. The value is only the
+	// file's id, so they are checked against the file itself (ValidateFile).
+	Accept  []string `json:"accept,omitempty"`
+	MaxSize int64    `json:"max_size,omitempty"`
 }
 
 // PropertySpec is a manageable property. Default is the module's own effective
@@ -240,6 +251,8 @@ const (
 	MaxLabelLength        = 120
 	MaxDescriptionLength  = 1000
 	MaxActionTimeout      = 60 // seconds
+	MaxAcceptEntries      = 32 // file: accepted extensions and media types
+	MaxFileIDLength       = 128
 )
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -247,8 +260,15 @@ var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 var fieldTypes = map[FieldType]bool{
 	FieldString: true, FieldInt: true, FieldNumber: true, FieldBool: true, FieldEnum: true,
 	FieldDuration: true, FieldBytes: true, FieldURL: true, FieldSecret: true, FieldStringList: true,
-	FieldStringMap: true,
+	FieldStringMap: true, FieldDatetime: true, FieldEnumList: true, FieldFile: true,
 }
+
+// A file field's accept entries: an extension, or a media type whose subtype
+// may be "*".
+var (
+	acceptExtPattern   = regexp.MustCompile(`^\.[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$`)
+	acceptMediaPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}/(\*|[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63})$`)
+)
 
 // ValidateManifest checks a manifest's structure, limits, and that every
 // declared default satisfies its own field spec.
@@ -325,7 +345,7 @@ func ValidateManifest(m ManagementManifest) error {
 			return fmt.Errorf("duplicate status key %q", s.Key)
 		}
 		seen[s.Key] = true
-		if !fieldTypes[s.Type] || s.Type == FieldSecret {
+		if !fieldTypes[s.Type] || s.Type == FieldSecret || s.Type == FieldFile {
 			return fmt.Errorf("status %q: invalid type %q", s.Key, s.Type)
 		}
 		if err := validateText(s.Label, s.Description); err != nil {
@@ -359,12 +379,22 @@ func validateText(label, description string) error {
 	return nil
 }
 
-func validateFieldSpec(f FieldSpec) error {
+// validateFieldSpec checks a field of a management manifest or a connection
+// schema, where file fields are refused: only a build hands files to a module.
+func validateFieldSpec(f FieldSpec) error { return checkFieldSpec(f, false) }
+
+// validateBuildFieldSpec checks a field of a build schema.
+func validateBuildFieldSpec(f FieldSpec) error { return checkFieldSpec(f, true) }
+
+func checkFieldSpec(f FieldSpec, allowFile bool) error {
 	if !keyPattern.MatchString(f.Key) {
 		return fmt.Errorf("key must match %s", keyPattern)
 	}
 	if !fieldTypes[f.Type] {
 		return fmt.Errorf("invalid type %q", f.Type)
+	}
+	if f.Type == FieldFile && !allowFile {
+		return fmt.Errorf("type file is only for build schemas")
 	}
 	if err := validateText(f.Label, f.Description); err != nil {
 		return err
@@ -372,8 +402,8 @@ func validateFieldSpec(f FieldSpec) error {
 	if f.Format != "" && (f.Type != FieldString || !keyPattern.MatchString(f.Format)) {
 		return fmt.Errorf("format is a lowercase name, only for string")
 	}
-	if f.Type == FieldEnum && (len(f.Options) == 0 || len(f.Options) > MaxEnumOptions) {
-		return fmt.Errorf("enum needs 1..%d options", MaxEnumOptions)
+	if (f.Type == FieldEnum || f.Type == FieldEnumList) && (len(f.Options) == 0 || len(f.Options) > MaxEnumOptions) {
+		return fmt.Errorf("%s needs 1..%d options", f.Type, MaxEnumOptions)
 	}
 	for _, o := range f.Options {
 		if err := validateText(o.Label, o.Description); err != nil {
@@ -393,8 +423,22 @@ func validateFieldSpec(f FieldSpec) error {
 			return fmt.Errorf("invalid key_pattern: %w", err)
 		}
 	}
-	if f.MaxItems < 0 || (f.MaxItems > 0 && f.Type != FieldStringList && f.Type != FieldStringMap) {
-		return fmt.Errorf("max_items is a positive count, only for string_list and string_map")
+	if f.MaxItems < 0 || (f.MaxItems > 0 && f.Type != FieldStringList && f.Type != FieldStringMap && f.Type != FieldEnumList) {
+		return fmt.Errorf("max_items is a positive count, only for string_list, string_map and enum_list")
+	}
+	if f.Type != FieldFile && (len(f.Accept) > 0 || f.MaxSize != 0) {
+		return fmt.Errorf("accept and max_size are only for file")
+	}
+	if f.MaxSize < 0 {
+		return fmt.Errorf("max_size must not be negative")
+	}
+	if len(f.Accept) > MaxAcceptEntries {
+		return fmt.Errorf("at most %d accept entries", MaxAcceptEntries)
+	}
+	for _, a := range f.Accept {
+		if !acceptExtPattern.MatchString(a) && !acceptMediaPattern.MatchString(a) {
+			return fmt.Errorf("accept %q is neither an extension (.ico) nor a media type (image/x-icon)", a)
+		}
 	}
 	switch f.Type {
 	case FieldInt, FieldNumber, FieldBytes:
@@ -412,6 +456,19 @@ func validateFieldSpec(f FieldSpec) error {
 					return fmt.Errorf("min/max must be durations: %w", err)
 				}
 			}
+		}
+	case FieldDatetime:
+		for _, b := range []any{f.Min, f.Max} {
+			if b != nil {
+				if _, err := ParseDatetime(b); err != nil {
+					return fmt.Errorf("min/max must be RFC 3339 timestamps")
+				}
+			}
+		}
+	case FieldFile:
+		// A file belongs to an operation, which a schema cannot name.
+		if f.Default != nil {
+			return fmt.Errorf("a file field has no default")
 		}
 	}
 	if f.Default != nil && f.Type != FieldSecret {
@@ -537,10 +594,137 @@ func ValidateValue(f FieldSpec, v any) error {
 				return fmt.Errorf("%q: %w", k, err)
 			}
 		}
+	case FieldDatetime:
+		t, err := ParseDatetime(v)
+		if err != nil {
+			return err
+		}
+		if f.Min != nil {
+			if lo, err := ParseDatetime(f.Min); err == nil && t.Before(lo) {
+				return fmt.Errorf("must not be before %v", f.Min)
+			}
+		}
+		if f.Max != nil {
+			if hi, err := ParseDatetime(f.Max); err == nil && t.After(hi) {
+				return fmt.Errorf("must not be after %v", f.Max)
+			}
+		}
+	case FieldEnumList:
+		items, err := stringItems(v)
+		if err != nil {
+			return err
+		}
+		if f.Required && len(items) == 0 {
+			return fmt.Errorf("at least one option is required")
+		}
+		if f.MaxItems > 0 && len(items) > f.MaxItems {
+			return fmt.Errorf("at most %d items", f.MaxItems)
+		}
+		seen := make(map[string]bool, len(items))
+		for _, s := range items {
+			if !hasOption(f, s) {
+				return fmt.Errorf("%q is not one of the declared options", s)
+			}
+			if seen[s] {
+				return fmt.Errorf("%q is listed twice", s)
+			}
+			seen[s] = true
+		}
+	case FieldFile:
+		s, ok := v.(string)
+		if !ok || s == "" {
+			return fmt.Errorf("must be a file id")
+		}
+		if len(s) > MaxFileIDLength {
+			return fmt.Errorf("file id longer than %d characters", MaxFileIDLength)
+		}
 	default:
 		return fmt.Errorf("unknown type %q", f.Type)
 	}
 	return nil
+}
+
+// stringItems reads an enum_list value: a JSON array of strings.
+func stringItems(v any) ([]string, error) {
+	switch items := v.(type) {
+	case []string:
+		return items, nil
+	case []any:
+		out := make([]string, len(items))
+		for i, it := range items {
+			s, ok := it.(string)
+			if !ok {
+				return nil, fmt.Errorf("item %d must be a string", i)
+			}
+			out[i] = s
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("must be a list of option values")
+}
+
+func hasOption(f FieldSpec, value string) bool {
+	for _, o := range f.Options {
+		if o.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateFieldValues checks a set of values against fields: every key must
+// be declared, every value valid, every required field set. It returns the
+// problems by key (nil when there are none); an undeclared key is reported
+// under its own name.
+func ValidateFieldValues(fields []FieldSpec, values map[string]any) map[string]string {
+	return validateValues(fields, values, "not a declared field")
+}
+
+func validateValues(fields []FieldSpec, values map[string]any, undeclared string) map[string]string {
+	var problems map[string]string
+	add := func(key, reason string) {
+		if problems == nil {
+			problems = map[string]string{}
+		}
+		problems[key] = reason
+	}
+	declared := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		declared[f.Key] = true
+	}
+	for key := range values {
+		if !declared[key] {
+			add(key, undeclared)
+		}
+	}
+	for _, f := range fields {
+		v, ok := values[f.Key]
+		if !ok || v == nil {
+			if f.Required && f.Default == nil {
+				add(f.Key, "value is required")
+			}
+			continue
+		}
+		if err := ValidateValue(f, v); err != nil {
+			add(f.Key, err.Error())
+		}
+	}
+	return problems
+}
+
+// ResolveFieldValues returns values over the fields' defaults, for declared
+// fields only: what a module is given, so it never interprets a schema.
+// Fields with neither a value nor a default are left out.
+func ResolveFieldValues(fields []FieldSpec, values map[string]any) map[string]any {
+	out := make(map[string]any, len(fields))
+	for _, f := range fields {
+		if v, ok := values[f.Key]; ok && v != nil {
+			out[f.Key] = v
+		} else if f.Default != nil {
+			out[f.Key] = f.Default
+		}
+	}
+	return out
 }
 
 func validateString(f FieldSpec, s string) error {
@@ -620,6 +804,18 @@ func toDuration(v any) (time.Duration, error) {
 
 // ParseDuration parses a duration value as validated by ValidateValue.
 func ParseDuration(v any) (time.Duration, error) { return toDuration(v) }
+
+// ParseDatetime parses a datetime value as validated by ValidateValue: an
+// RFC 3339 timestamp string.
+func ParseDatetime(v any) (time.Time, error) {
+	s, ok := v.(string)
+	if ok {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("must be an RFC 3339 timestamp like \"2027-01-31T00:00:00Z\"")
+}
 
 // AsInt64 converts a numeric value as validated by ValidateValue.
 func AsInt64(v any) (int64, bool) {

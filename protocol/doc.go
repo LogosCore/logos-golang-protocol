@@ -13,4 +13,10 @@
 //   - the shared control-plane Envelope / ReplyEnvelope and helpers
 //   - constants for canonical type, version, status, and error-code fields
 //   - validation helpers with typed, machine-readable errors
+//   - what modules declare at registration and the operations that follow:
+//     the management manifest and its RPC payloads (management.go), live log
+//     streaming (logs.go), a channel's minion connection schema
+//     (connection.go), and a factory's build schema (build.go) with the build
+//     operations (build_ops.go). They share one field description, FieldSpec,
+//     and one validator for its values.
 package protocol
