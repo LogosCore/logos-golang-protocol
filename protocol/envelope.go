@@ -39,7 +39,11 @@ const (
 	CodeValidationFailed   = "validation_failed"
 	CodeUnsupportedVersion = "unsupported_version"
 	CodeUnknownInstance    = "unknown_instance"
-	CodeInternalError      = "internal_error"
+	// CodeInstanceBlocked refuses a module.register from an instance an
+	// operator blocked: core takes neither its registrations nor its traffic
+	// until it is unblocked.
+	CodeInstanceBlocked = "instance_blocked"
+	CodeInternalError   = "internal_error"
 )
 
 // timestampFormat is UTC RFC3339 with millisecond precision, the canonical
