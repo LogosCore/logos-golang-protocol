@@ -3,11 +3,10 @@ package protocol
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 )
 
 // This file defines the shared **control-plane** AMQP envelope used by every
@@ -90,10 +89,17 @@ type ReplyEnvelope struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
-// NewULID returns a fresh ULID string. The envelope mandates ULIDs for
-// message_id (lexicographically sortable, timestamp-prefixed).
-func NewULID() string {
-	return ulid.MustNew(ulid.Timestamp(time.Now().UTC()), rand.Reader).String()
+// NewID returns a fresh random UUID (version 4) in its canonical lowercase
+// form. It is the one format of the ids Logos mints: message and correlation
+// ids, invocation ids, log stream ids, minion ids. A receiver treats an id as
+// an opaque string; it reads nothing, not even an order, from it.
+func NewID() string {
+	var b [16]byte
+	// Read never fails: crypto/rand crashes the program instead.
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // the RFC 9562 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // NowTimestamp renders the current time in the canonical UTC ms RFC3339 format.
@@ -138,7 +144,7 @@ func NewReply(req Envelope, source Source, payload any) (ReplyEnvelope, error) {
 		return ReplyEnvelope{}, err
 	}
 	return ReplyEnvelope{
-		MessageID:     NewULID(),
+		MessageID:     NewID(),
 		CorrelationID: req.CorrelationID,
 		Type:          req.Type,
 		Version:       req.Version,
@@ -154,7 +160,7 @@ func NewReply(req Envelope, source Source, payload any) (ReplyEnvelope, error) {
 // and message.
 func NewErrorReply(req Envelope, source Source, code, message string) ReplyEnvelope {
 	return ReplyEnvelope{
-		MessageID:     NewULID(),
+		MessageID:     NewID(),
 		CorrelationID: req.CorrelationID,
 		Type:          req.Type,
 		Version:       req.Version,
@@ -174,7 +180,7 @@ func NewEvent(eventType, version string, source Source, payload any) (Envelope, 
 		return Envelope{}, err
 	}
 	return Envelope{
-		MessageID: NewULID(),
+		MessageID: NewID(),
 		Type:      eventType,
 		Version:   version,
 		Timestamp: NowTimestamp(),

@@ -4,20 +4,21 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 )
 
 func coreSource() Source { return Source{Service: ServiceCore, Instance: "core-1"} }
 
-func TestNewULID_ParsesAndIsUnique(t *testing.T) {
-	a := NewULID()
-	b := NewULID()
-	if _, err := ulid.Parse(a); err != nil {
-		t.Fatalf("NewULID produced unparseable ULID %q: %v", a, err)
-	}
-	if a == b {
-		t.Fatalf("expected distinct ULIDs, got %q twice", a)
+func TestNewID(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id := NewID()
+		if !minionIDPattern.MatchString(id) {
+			t.Fatalf("NewID() = %q, want a lowercase UUIDv4", id)
+		}
+		if seen[id] {
+			t.Fatalf("NewID() returned %q twice", id)
+		}
+		seen[id] = true
 	}
 }
 
@@ -40,8 +41,8 @@ func TestNewReply_EchoesCorrelationAndType(t *testing.T) {
 	if reply.Source.Service != ServiceCore {
 		t.Errorf("source.service = %q, want %q", reply.Source.Service, ServiceCore)
 	}
-	if _, err := ulid.Parse(reply.MessageID); err != nil {
-		t.Errorf("reply message_id %q not a ULID: %v", reply.MessageID, err)
+	if !minionIDPattern.MatchString(reply.MessageID) {
+		t.Errorf("reply message_id %q is not a UUIDv4", reply.MessageID)
 	}
 	ts, err := time.Parse(time.RFC3339, reply.Timestamp)
 	if err != nil {

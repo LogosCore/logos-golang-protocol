@@ -12,7 +12,6 @@ import (
 // contracts/minion-build), verbatim.
 const (
 	docBuildRequest = `{
-  "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN",
   "minion_id": "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
   "target": "windows-exe",
   "platform": "windows/amd64",
@@ -45,11 +44,11 @@ const (
   "crypto": { "suite": "x25519-xchacha20poly1305", "material": { "…": "…" } },
   "artifact": { "upload_url": "http://logos-seaweedfs-s3:8333/…?X-Amz-Signature=…", "max_size": 268435456 },
   "deadline": "2026-10-26T14:30:00Z",
-  "actor": { "type": "user", "id": "6ab79922…", "name": "admin" }
+  "actor": { "type": "user", "id": "f140266c-…", "name": "admin" }
 }`
 
 	docBuildSucceeded = `{
-  "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN",
+  "minion_id": "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
   "status": "succeeded",
   "artifact": {
     "filename": "WinTelemetry.exe", "size": 2412544,
@@ -62,14 +61,14 @@ const (
 }`
 
 	docBuildFailed = `{
-  "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN",
+  "minion_id": "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
   "status": "failed",
   "error": { "code": "compile_failed", "message": "go build exited with status 1" },
   "log": "…"
 }`
 
 	docBuildReply = `{
-  "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN",
+  "minion_id": "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
   "accepted": true,
   "steps": [
     { "id": "fetch", "label": "Fetch files" },
@@ -79,7 +78,7 @@ const (
   ]
 }`
 
-	docBuildProgress = `{ "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN", "step": "compile", "message": "Compiling windows/amd64" }`
+	docBuildProgress = `{ "minion_id": "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f", "step": "compile", "message": "Compiling windows/amd64" }`
 )
 
 const iconID = "0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55"
@@ -134,7 +133,7 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		key    string
 		mutate func(r *BuildRequest)
 	}{
-		{"build_id", func(r *BuildRequest) { r.BuildID = "build-1" }},
+		{"minion_id", func(r *BuildRequest) { r.MinionID = "" }},
 		{"minion_id", func(r *BuildRequest) { r.MinionID = strings.ToUpper(r.MinionID) }},
 		{"minion_id", func(r *BuildRequest) { r.MinionID = "5b0c4f6e-8a1d-1c2b-9e7f-3d2a1b0c9e8f" }}, // version 1
 		{"schema_version", func(r *BuildRequest) { r.SchemaVersion = 2 }},
@@ -250,7 +249,7 @@ func TestBuildResult_Invalid(t *testing.T) {
 		doc    string
 		mutate func(r *BuildResult)
 	}{
-		{"build_id must be a ULID", docBuildSucceeded, func(r *BuildResult) { r.BuildID = "" }},
+		{"minion_id must be a lowercase UUIDv4", docBuildSucceeded, func(r *BuildResult) { r.MinionID = "" }},
 		{"status must be", docBuildSucceeded, func(r *BuildResult) { r.Status = "done" }},
 		{"needs its artifact", docBuildSucceeded, func(r *BuildResult) { r.Artifact = nil }},
 		{"has no error", docBuildSucceeded, func(r *BuildResult) { r.Error = &BuildError{Code: "oops"} }},
@@ -276,11 +275,11 @@ func TestBuildResult_Invalid(t *testing.T) {
 }
 
 func TestBuildProgress(t *testing.T) {
-	p := BuildProgress{BuildID: "01M6A3Q9X7J0B5KQZC2V1RS8TN", Step: "compile", Message: "compiling 3 of 10"}
+	p := BuildProgress{MinionID: "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f", Step: "compile", Message: "compiling 3 of 10"}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	bare := BuildProgress{BuildID: p.BuildID, Step: "link_2"}
+	bare := BuildProgress{MinionID: p.MinionID, Step: "link_2"}
 	if err := bare.Validate(); err != nil {
 		t.Fatalf("no message: %v", err)
 	}
@@ -288,11 +287,11 @@ func TestBuildProgress(t *testing.T) {
 		t.Errorf("an empty message sent: %s", raw)
 	}
 	for name, bad := range map[string]BuildProgress{
-		"build_id":     {BuildID: "b-1", Step: "compile"},
-		"step":         {BuildID: p.BuildID, Step: "Compile"},
-		"dotted step":  {BuildID: p.BuildID, Step: "go.build"},
-		"no step":      {BuildID: p.BuildID},
-		"long message": {BuildID: p.BuildID, Step: "compile", Message: strings.Repeat("x", MaxBuildMessageLength+1)},
+		"minion_id":    {MinionID: "b-1", Step: "compile"},
+		"step":         {MinionID: p.MinionID, Step: "Compile"},
+		"dotted step":  {MinionID: p.MinionID, Step: "go.build"},
+		"no step":      {MinionID: p.MinionID},
+		"long message": {MinionID: p.MinionID, Step: "compile", Message: strings.Repeat("x", MaxBuildMessageLength+1)},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -319,7 +318,7 @@ func TestDocReplyAndProgress(t *testing.T) {
 
 func TestBuildReply(t *testing.T) {
 	steps := []BuildStep{{ID: "fetch", Label: "Fetch sources"}, {ID: "compile", Label: "Compile"}, {ID: "sign-2", Label: "Подписать"}}
-	r := BuildReply{BuildID: "01M6A3Q9X7J0B5KQZC2V1RS8TN", Accepted: true, Steps: steps}
+	r := BuildReply{MinionID: "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f", Accepted: true, Steps: steps}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -343,15 +342,15 @@ func TestBuildReply(t *testing.T) {
 		reply BuildReply
 		want  string
 	}{
-		"no plan":      {BuildReply{BuildID: r.BuildID, Accepted: true}, "at least one step"},
-		"too many":     {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: many}, "too many"},
-		"dotted id":    {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "go.build", Label: "Build"}}}, "id must match"},
-		"same id":      {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}}, "used twice"},
-		"no label":     {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: " "}}}, "label must be 1.."},
-		"long label":   {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: long + "ж"}}}, "label must be 1.."},
-		"two lines":    {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "Build\nand sign"}}}, "one line"},
-		"not accepted": {BuildReply{BuildID: r.BuildID, Steps: steps}, "accepted must be true"},
-		"bad build id": {BuildReply{BuildID: "b-1", Accepted: true, Steps: steps}, "build_id"},
+		"no plan":       {BuildReply{MinionID: r.MinionID, Accepted: true}, "at least one step"},
+		"too many":      {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: many}, "too many"},
+		"dotted id":     {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: []BuildStep{{ID: "go.build", Label: "Build"}}}, "id must match"},
+		"same id":       {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}}, "used twice"},
+		"no label":      {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: " "}}}, "label must be 1.."},
+		"long label":    {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: long + "ж"}}}, "label must be 1.."},
+		"two lines":     {BuildReply{MinionID: r.MinionID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "Build\nand sign"}}}, "one line"},
+		"not accepted":  {BuildReply{MinionID: r.MinionID, Steps: steps}, "accepted must be true"},
+		"bad minion id": {BuildReply{MinionID: "b-1", Accepted: true, Steps: steps}, "minion_id"},
 	} {
 		if err := c.reply.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: want an error containing %q, got %v", name, c.want, err)

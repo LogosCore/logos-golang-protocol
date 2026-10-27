@@ -13,7 +13,7 @@ import (
 // machine-readable code.
 func ExampleValidateInbound() {
 	msg := protocol.InboundMinionMessage{
-		MessageID: protocol.NewULID(),
+		MessageID: protocol.NewID(),
 		Type:      protocol.TypeInboundMinionMessage,
 		Version:   protocol.VersionV1,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -52,7 +52,7 @@ func ExampleValidateInbound() {
 // carries no Source.
 func ExampleValidateOutbound() {
 	msg := protocol.OutboundMinionMessage{
-		MessageID:     protocol.NewULID(),
+		MessageID:     protocol.NewID(),
 		Type:          protocol.TypeOutboundMinionMessage,
 		Version:       protocol.VersionV1,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
