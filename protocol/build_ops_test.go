@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,19 @@ const (
   "error": { "code": "compile_failed", "message": "go build exited with status 1" },
   "log": "…"
 }`
+
+	docBuildReply = `{
+  "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN",
+  "accepted": true,
+  "steps": [
+    { "id": "fetch", "label": "Fetch files" },
+    { "id": "compile", "label": "Compile" },
+    { "id": "sign", "label": "Sign" },
+    { "id": "upload", "label": "Upload" }
+  ]
+}`
+
+	docBuildProgress = `{ "build_id": "01M6A3Q9X7J0B5KQZC2V1RS8TN", "step": "compile", "message": "Compiling windows/amd64" }`
 )
 
 const iconID = "0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55"
@@ -262,33 +276,85 @@ func TestBuildResult_Invalid(t *testing.T) {
 }
 
 func TestBuildProgress(t *testing.T) {
-	pct := 40
-	p := BuildProgress{BuildID: "01M6A3Q9X7J0B5KQZC2V1RS8TN", Step: "compile", Message: "Compiling windows/amd64", Percent: &pct}
+	p := BuildProgress{BuildID: "01M6A3Q9X7J0B5KQZC2V1RS8TN", Step: "compile", Message: "compiling 3 of 10"}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	unknown := p
-	unknown.Percent = nil
-	if err := unknown.Validate(); err != nil {
-		t.Fatalf("no percent: %v", err)
+	bare := BuildProgress{BuildID: p.BuildID, Step: "link_2"}
+	if err := bare.Validate(); err != nil {
+		t.Fatalf("no message: %v", err)
 	}
-	if raw, _ := json.Marshal(unknown); strings.Contains(string(raw), "percent") {
-		t.Errorf("unknown percent sent: %s", raw)
+	if raw, _ := json.Marshal(bare); strings.Contains(string(raw), "message") {
+		t.Errorf("an empty message sent: %s", raw)
 	}
-
-	over, zero := 101, 0
 	for name, bad := range map[string]BuildProgress{
 		"build_id":     {BuildID: "b-1", Step: "compile"},
 		"step":         {BuildID: p.BuildID, Step: "Compile"},
+		"dotted step":  {BuildID: p.BuildID, Step: "go.build"},
 		"no step":      {BuildID: p.BuildID},
-		"percent":      {BuildID: p.BuildID, Step: "compile", Percent: &over},
 		"long message": {BuildID: p.BuildID, Step: "compile", Message: strings.Repeat("x", MaxBuildMessageLength+1)},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if err := (BuildProgress{BuildID: p.BuildID, Step: "queued", Percent: &zero}).Validate(); err != nil {
-		t.Errorf("0%%: %v", err)
+}
+
+func TestDocReplyAndProgress(t *testing.T) {
+	var r BuildReply
+	if err := json.Unmarshal([]byte(docBuildReply), &r); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Validate(); err != nil || len(r.Steps) != 4 || r.Steps[1] != (BuildStep{ID: "compile", Label: "Compile"}) {
+		t.Errorf("the documented reply: %v %+v", err, r)
+	}
+	var p BuildProgress
+	if err := json.Unmarshal([]byte(docBuildProgress), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil || p.Step != "compile" {
+		t.Errorf("the documented progress: %v %+v", err, p)
+	}
+}
+
+func TestBuildReply(t *testing.T) {
+	steps := []BuildStep{{ID: "fetch", Label: "Fetch sources"}, {ID: "compile", Label: "Compile"}, {ID: "sign-2", Label: "Подписать"}}
+	r := BuildReply{BuildID: "01M6A3Q9X7J0B5KQZC2V1RS8TN", Accepted: true, Steps: steps}
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(r)
+	if !strings.Contains(string(raw), `"steps":[{"id":"fetch","label":"Fetch sources"}`) {
+		t.Errorf("reply on the wire: %s", raw)
+	}
+
+	many := make([]BuildStep, MaxBuildSteps+1)
+	for i := range many {
+		many[i] = BuildStep{ID: fmt.Sprintf("s%d", i), Label: "Step"}
+	}
+	if err := ValidateBuildSteps(many[:MaxBuildSteps]); err != nil {
+		t.Errorf("a plan of %d steps: %v", MaxBuildSteps, err)
+	}
+	long := strings.Repeat("ж", MaxBuildStepLabelLength) // two bytes each: counted in characters
+	if err := ValidateBuildSteps([]BuildStep{{ID: "a", Label: long}}); err != nil {
+		t.Errorf("a label of %d characters: %v", MaxBuildStepLabelLength, err)
+	}
+	for name, c := range map[string]struct {
+		reply BuildReply
+		want  string
+	}{
+		"no plan":      {BuildReply{BuildID: r.BuildID, Accepted: true}, "at least one step"},
+		"too many":     {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: many}, "too many"},
+		"dotted id":    {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "go.build", Label: "Build"}}}, "id must match"},
+		"same id":      {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}}, "used twice"},
+		"no label":     {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: " "}}}, "label must be 1.."},
+		"long label":   {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: long + "ж"}}}, "label must be 1.."},
+		"two lines":    {BuildReply{BuildID: r.BuildID, Accepted: true, Steps: []BuildStep{{ID: "a", Label: "Build\nand sign"}}}, "one line"},
+		"not accepted": {BuildReply{BuildID: r.BuildID, Steps: steps}, "accepted must be true"},
+		"bad build id": {BuildReply{BuildID: "b-1", Accepted: true, Steps: steps}, "build_id"},
+	} {
+		if err := c.reply.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want an error containing %q, got %v", name, c.want, err)
+		}
 	}
 }

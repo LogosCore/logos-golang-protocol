@@ -9,14 +9,16 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 )
 
 // This file defines the build operations. Builds are asynchronous: core sends
 // factory.build to a factory instance's rpc_queue and the factory accepts it
-// at once. While it works it reports progress to core on logos.core.rpc; when
-// it is done it uploads the artifact to a presigned URL and sends
+// at once, with its plan for the build: the steps it will go through. While
+// it works it reports the step it is on to core on logos.core.rpc; when it is
+// done it uploads the artifact to a presigned URL and sends
 // factory.build.result. Core can stop a build with factory.build.cancel. All
 // four operations are request/reply.
 
@@ -42,13 +44,18 @@ const (
 	MaxBuildCapabilities      = 256
 	MaxBuildMessageLength     = 1000 // a progress message, warning or error message
 	MaxArtifactFilenameLength = 255
+	MaxBuildSteps             = 32
+	MaxBuildStepLabelLength   = 64 // characters
 )
 
 var (
 	minionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	sha256Pattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	// slugPattern is what build steps, capabilities and error codes match.
+	// slugPattern is what capabilities and error codes match.
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,62}$`)
+	// stepIDPattern is what a build step's id matches: a slug without dots,
+	// so it can key a build's steps in a document.
+	stepIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 )
 
 // ChannelEndpointExport is a channel endpoint as a minion's connection
@@ -123,6 +130,59 @@ type BuildRequest struct {
 type BuildReply struct {
 	BuildID  string `json:"build_id"`
 	Accepted bool   `json:"accepted"`
+	// Steps is the factory's plan for this build: the steps it goes through,
+	// in order, for these parameters. Progress names the step it is on, and
+	// the app shows the plan as the build's pipeline.
+	Steps []BuildStep `json:"steps"`
+}
+
+// BuildStep is one step of a build's plan.
+type BuildStep struct {
+	// ID names the step in progress reports: a slug without dots,
+	// ^[a-z0-9][a-z0-9_-]{0,62}$.
+	ID string `json:"id"`
+	// Label is what the operator sees, e.g. "Compile": 1 to
+	// MaxBuildStepLabelLength characters on one line.
+	Label string `json:"label"`
+}
+
+// Validate checks a reply: the build id, and a plan of 1 to MaxBuildSteps
+// steps with unique, valid ids and labels.
+func (r BuildReply) Validate() error {
+	if _, err := ulid.ParseStrict(r.BuildID); err != nil {
+		return fmt.Errorf("build_id must be a ULID")
+	}
+	if !r.Accepted {
+		return fmt.Errorf("accepted must be true: a factory that does not take a build replies with an error")
+	}
+	return ValidateBuildSteps(r.Steps)
+}
+
+// ValidateBuildSteps checks a build's plan: 1 to MaxBuildSteps steps, ids
+// matching the step pattern and unique, labels of 1 to
+// MaxBuildStepLabelLength characters without control characters.
+func ValidateBuildSteps(steps []BuildStep) error {
+	if len(steps) == 0 {
+		return fmt.Errorf("steps: a plan has at least one step")
+	}
+	if len(steps) > MaxBuildSteps {
+		return fmt.Errorf("steps: too many (%d > %d)", len(steps), MaxBuildSteps)
+	}
+	seen := make(map[string]bool, len(steps))
+	for i, st := range steps {
+		switch n := utf8.RuneCountInString(st.Label); {
+		case !stepIDPattern.MatchString(st.ID):
+			return fmt.Errorf("steps[%d]: id must match %s", i, stepIDPattern)
+		case seen[st.ID]:
+			return fmt.Errorf("steps[%d]: id %q is used twice", i, st.ID)
+		case strings.TrimSpace(st.Label) == "" || n > MaxBuildStepLabelLength:
+			return fmt.Errorf("steps[%d]: label must be 1..%d characters", i, MaxBuildStepLabelLength)
+		case !utf8.ValidString(st.Label) || strings.IndexFunc(st.Label, unicode.IsControl) >= 0:
+			return fmt.Errorf("steps[%d]: label must be one line of text", i)
+		}
+		seen[st.ID] = true
+	}
+	return nil
 }
 
 // BuildCancelRequest is the factory.build.cancel payload. The factory stops
@@ -138,16 +198,16 @@ type BuildCancelReply struct {
 	Cancelled bool   `json:"cancelled"`
 }
 
-// BuildProgress is the factory.build.progress payload. Progress is best
-// effort: a factory does not send a lost one again.
+// BuildProgress is the factory.build.progress payload: the factory is on a
+// step of its plan. Progress is best effort: a factory does not send a lost
+// one again, and core takes the steps before the one reported as done.
 type BuildProgress struct {
 	BuildID string `json:"build_id"`
-	// Step is a short name for what the factory is doing (e.g. "compile").
+	// Step is the id of the step of the plan the factory is on.
 	Step string `json:"step"`
-	// Message is shown to the operator.
+	// Message is shown to the operator with the step, e.g. "compiling 3 of
+	// 10"; a report without one clears the step's last.
 	Message string `json:"message,omitempty"`
-	// Percent is how far the build is, 0 to 100, when the factory knows.
-	Percent *int `json:"percent,omitempty"`
 }
 
 // BuildProgressReply is the factory.build.progress reply payload. Core replies
@@ -333,14 +393,11 @@ func (p BuildProgress) Validate() error {
 	if _, err := ulid.ParseStrict(p.BuildID); err != nil {
 		return fmt.Errorf("build_id must be a ULID")
 	}
-	if !slugPattern.MatchString(p.Step) {
-		return fmt.Errorf("step must match %s", slugPattern)
+	if !stepIDPattern.MatchString(p.Step) {
+		return fmt.Errorf("step must be a step id of the plan (%s)", stepIDPattern)
 	}
 	if len(p.Message) > MaxBuildMessageLength {
 		return fmt.Errorf("message longer than %d", MaxBuildMessageLength)
-	}
-	if p.Percent != nil && (*p.Percent < 0 || *p.Percent > 100) {
-		return fmt.Errorf("percent must be 0..100")
 	}
 	return nil
 }
