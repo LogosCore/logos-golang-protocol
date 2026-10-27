@@ -40,7 +40,12 @@ var iconURL = regexp.MustCompile(`(?i)url\(\s*['"]?([^'")\s]*)`)
 //
 // The UI shows an icon as a single-colour glyph in its own text colour, like
 // its built-in icons, so its colours do not matter: draw shapes on a
-// transparent background, for example with stroke="currentColor".
+// transparent background, for example with stroke="currentColor". That
+// colour is light on dark themes and dark on light ones. Line art reads the
+// same either way; an icon whose shape is the lit parts of a shaded drawing
+// reads as a negative on light themes. Such a module also registers an
+// icon_light, drawn with the shadows and lines as the shape, which the UI
+// shows on light themes instead; it is checked the same way.
 func ValidateIcon(svg string) error {
 	if strings.TrimSpace(svg) == "" {
 		return errors.New("icon is empty")
