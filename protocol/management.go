@@ -89,6 +89,7 @@ type EnumOption struct {
 // (never validated): the UI may offer a helper for it, e.g. a generator.
 const (
 	FormatUserAgent = "user_agent" // an HTTP User-Agent string
+	FormatPath      = "path"       // a URL path, e.g. /cdn/assets/
 )
 
 // FieldSpec describes a typed value plus its constraints and UI hints. It is
