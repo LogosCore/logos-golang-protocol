@@ -120,9 +120,6 @@ type BuildCommand struct {
 	ID          string `json:"id"`
 	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
-	// Group names a theme of the command (Session, Files, ...), shown with
-	// it where the factory's commands are described.
-	Group string `json:"group,omitempty"`
 	// Targets narrows the command to these targets; empty means all of them.
 	Targets []string `json:"targets,omitempty"`
 	// Default commands are picked in a new build until the operator unpicks
@@ -324,9 +321,6 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 	}
 	if err := validateText(c.Label, c.Description); err != nil {
 		return err
-	}
-	if len(c.Group) > MaxLabelLength {
-		return fmt.Errorf("group longer than %d", MaxLabelLength)
 	}
 	for i, t := range c.Targets {
 		if !targets[t] {

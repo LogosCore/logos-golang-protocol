@@ -68,23 +68,23 @@ const docBuildSchema = `{
   ],
   "commands": [
     {
-      "id": "sleep", "label": "Sleep", "group": "Session", "required": true,
+      "id": "sleep", "label": "Sleep", "required": true,
       "description": "Changes how long the minion waits between check-ins.",
       "params": [
         { "key": "interval", "type": "duration", "label": "Interval", "required": true },
         { "key": "jitter", "type": "int", "label": "Jitter", "unit": "%", "min": 0, "max": 100, "default": 0 }
       ]
     },
-    { "id": "exit", "label": "Exit", "group": "Session", "required": true },
+    { "id": "exit", "label": "Exit", "required": true },
     {
-      "id": "shell", "label": "Run a command", "group": "Execution", "default": true,
+      "id": "shell", "label": "Run a command", "default": true,
       "params": [{ "key": "command", "type": "string", "label": "Command", "required": true }]
     },
     {
-      "id": "download", "label": "Download a file", "group": "Files", "default": true,
+      "id": "download", "label": "Download a file", "default": true,
       "params": [{ "key": "path", "type": "string", "label": "Path", "required": true }]
     },
-    { "id": "screenshot", "label": "Screenshot", "group": "Collection", "targets": ["windows-exe"] }
+    { "id": "screenshot", "label": "Screenshot", "targets": ["windows-exe"] }
   ]
 }`
 
@@ -252,7 +252,6 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`command "fs.ls": id must match`, func(s *BuildSchema) { s.Commands[2].ID = "fs.ls" }},
 		{`duplicate command "exit"`, func(s *BuildSchema) { s.Commands = append(s.Commands, s.Commands[1]) }},
 		{`command "exit": label longer than`, func(s *BuildSchema) { s.Commands[1].Label = strings.Repeat("x", MaxLabelLength+1) }},
-		{`command "exit": group longer than`, func(s *BuildSchema) { s.Commands[1].Group = strings.Repeat("x", MaxLabelLength+1) }},
 		{`command "screenshot": target "macos-app" is not one the factory lists`, func(s *BuildSchema) {
 			s.Commands[4].Targets = []string{"macos-app"}
 		}},
