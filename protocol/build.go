@@ -120,7 +120,8 @@ type BuildCommand struct {
 	ID          string `json:"id"`
 	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
-	// Group is the heading the command is listed under, as a field's group.
+	// Group names a theme of the command (Session, Files, ...), shown with
+	// it where the factory's commands are described.
 	Group string `json:"group,omitempty"`
 	// Targets narrows the command to these targets; empty means all of them.
 	Targets []string `json:"targets,omitempty"`
