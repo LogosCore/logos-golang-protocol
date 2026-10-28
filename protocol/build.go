@@ -16,8 +16,9 @@ import (
 // A schema lists targets (what the factory can produce: a format, the
 // platforms it runs on, its own fields) next to the fields every target
 // shares, the channel kinds its minions speak, with the factory's own
-// connection parameters for each, and the payload crypto suites they
-// implement. Values are validated with the same FieldSpec rules as management
+// connection parameters for each, the payload crypto suites they implement,
+// and the commands they can be built with, from which operators pick each
+// build's. Values are validated with the same FieldSpec rules as management
 // properties.
 
 // BuildSchemaV1 is the current build schema format version.
@@ -36,6 +37,8 @@ const (
 	MaxBuildChannelVersions = 16 // per channel kind
 	MaxConnectionParams     = 32 // per channel kind
 	MaxBuildCryptoSuites    = 16
+	MaxBuildCommands        = 256
+	MaxCommandParams        = 32 // per command
 )
 
 var (
@@ -43,6 +46,9 @@ var (
 	targetIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	platformPattern    = regexp.MustCompile(`^[a-z0-9]{1,31}/[a-z0-9]{1,31}$`)
 	cryptoSuitePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
+	// commandIDPattern is a target id's: no dots, so a command's id can key a
+	// document.
+	commandIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	// moduleNamePattern: core only requires a module name, so a factory can
 	// name any channel kind that registers.
 	moduleNamePattern = regexp.MustCompile(`^\S{1,64}$`)
@@ -65,6 +71,10 @@ type BuildSchema struct {
 	// Fields are the build parameters every target shares.
 	Fields  []FieldSpec   `json:"fields,omitempty"`
 	Targets []BuildTarget `json:"targets"`
+	// Commands are what the minions can do. An operator picks a build's
+	// from those of its target, and the minion has only those. Optional: a
+	// factory without commands builds minions with none.
+	Commands []BuildCommand `json:"commands,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name) and the connection
@@ -99,6 +109,36 @@ type BuildTarget struct {
 	// versions the factory lists; empty means all of them. The connection
 	// parameters stay the factory's.
 	Channels []ChannelVersions `json:"channels,omitempty"`
+}
+
+// BuildCommand is a command a factory's minions can be built with. An
+// operator picks a build's commands, so a minion carries only what its job
+// needs.
+type BuildCommand struct {
+	// ID names the command in builds (and in tasks, once minions take them),
+	// unique in the schema: ^[a-z][a-z0-9_-]{0,62}$.
+	ID          string `json:"id"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Group is the heading the command is listed under, as a field's group.
+	Group string `json:"group,omitempty"`
+	// Targets narrows the command to these targets; empty means all of them.
+	Targets []string `json:"targets,omitempty"`
+	// Default commands are picked in a new build until the operator unpicks
+	// them, and a build that names no commands gets them.
+	Default bool `json:"default,omitempty"`
+	// Required commands are in every build of a target that has them: the
+	// minion cannot run without them (sleep, exit), so the operator cannot
+	// leave them out.
+	Required bool `json:"required,omitempty"`
+	// Params are what a task of the command takes: field specs as a
+	// management action's, file aside.
+	Params []FieldSpec `json:"params,omitempty"`
+}
+
+// For reports whether a build of target id can have the command.
+func (c BuildCommand) For(id string) bool {
+	return len(c.Targets) == 0 || slices.Contains(c.Targets, id)
 }
 
 // Target returns the target with id, if declared.
@@ -150,6 +190,40 @@ func (s BuildSchema) Supports(t BuildTarget, moduleName string, version int) boo
 		}
 	}
 	return false
+}
+
+// Command returns the command with id, if declared.
+func (s BuildSchema) Command(id string) (BuildCommand, bool) {
+	for _, c := range s.Commands {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return BuildCommand{}, false
+}
+
+// TargetCommands returns the commands a build of t can have, in the schema's
+// order.
+func (s BuildSchema) TargetCommands(t BuildTarget) []BuildCommand {
+	var out []BuildCommand
+	for _, c := range s.Commands {
+		if c.For(t.ID) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// DefaultCommands returns the ids of the commands a build of t gets when it
+// names none: its default and required ones, in the schema's order.
+func (s BuildSchema) DefaultCommands(t BuildTarget) []string {
+	out := []string{}
+	for _, c := range s.TargetCommands(t) {
+		if c.Default || c.Required {
+			out = append(out, c.ID)
+		}
+	}
+	return out
 }
 
 // HasPlatform reports whether t runs on platform.
@@ -224,6 +298,56 @@ func ValidateBuildSchema(s BuildSchema) error {
 			return fmt.Errorf("duplicate target %q", t.ID)
 		}
 		ids[t.ID] = true
+	}
+
+	if len(s.Commands) > MaxBuildCommands {
+		return fmt.Errorf("too many commands (%d > %d)", len(s.Commands), MaxBuildCommands)
+	}
+	commands := make(map[string]bool, len(s.Commands))
+	for _, c := range s.Commands {
+		if err := validateBuildCommand(c, ids); err != nil {
+			return fmt.Errorf("command %q: %w", c.ID, err)
+		}
+		if commands[c.ID] {
+			return fmt.Errorf("duplicate command %q", c.ID)
+		}
+		commands[c.ID] = true
+	}
+	return nil
+}
+
+// validateBuildCommand checks a command; targets are the schema's target ids.
+func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
+	if !commandIDPattern.MatchString(c.ID) {
+		return fmt.Errorf("id must match %s", commandIDPattern)
+	}
+	if err := validateText(c.Label, c.Description); err != nil {
+		return err
+	}
+	if len(c.Group) > MaxLabelLength {
+		return fmt.Errorf("group longer than %d", MaxLabelLength)
+	}
+	for i, t := range c.Targets {
+		if !targets[t] {
+			return fmt.Errorf("target %q is not one the factory lists", t)
+		}
+		if slices.Contains(c.Targets[:i], t) {
+			return fmt.Errorf("duplicate target %q", t)
+		}
+	}
+	if len(c.Params) > MaxCommandParams {
+		return fmt.Errorf("too many params (%d > %d)", len(c.Params), MaxCommandParams)
+	}
+	params := make(map[string]bool, len(c.Params))
+	for _, p := range c.Params {
+		// A task hands no files to a minion yet: no file params.
+		if err := validateFieldSpec(p); err != nil {
+			return fmt.Errorf("param %q: %w", p.Key, err)
+		}
+		if params[p.Key] {
+			return fmt.Errorf("duplicate param %q", p.Key)
+		}
+		params[p.Key] = true
 	}
 	return nil
 }

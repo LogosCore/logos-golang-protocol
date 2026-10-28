@@ -65,6 +65,26 @@ const docBuildSchema = `{
       "platforms": ["windows/amd64", "linux/amd64"],
       "channels": [{ "module_name": "http", "versions": [2] }]
     }
+  ],
+  "commands": [
+    {
+      "id": "sleep", "label": "Sleep", "group": "Session", "required": true,
+      "description": "Changes how long the minion waits between check-ins.",
+      "params": [
+        { "key": "interval", "type": "duration", "label": "Interval", "required": true },
+        { "key": "jitter", "type": "int", "label": "Jitter", "unit": "%", "min": 0, "max": 100, "default": 0 }
+      ]
+    },
+    { "id": "exit", "label": "Exit", "group": "Session", "required": true },
+    {
+      "id": "shell", "label": "Run a command", "group": "Execution", "default": true,
+      "params": [{ "key": "command", "type": "string", "label": "Command", "required": true }]
+    },
+    {
+      "id": "download", "label": "Download a file", "group": "Files", "default": true,
+      "params": [{ "key": "path", "type": "string", "label": "Path", "required": true }]
+    },
+    { "id": "screenshot", "label": "Screenshot", "group": "Collection", "targets": ["windows-exe"] }
   ]
 }`
 
@@ -152,6 +172,37 @@ func TestBuildSchemaTargets(t *testing.T) {
 	}
 }
 
+func TestBuildSchemaCommands(t *testing.T) {
+	s := exampleBuildSchema(t)
+	ids := func(cs []BuildCommand) []string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return out
+	}
+	exe, elf := target(t, s, "windows-exe"), target(t, s, "linux-elf")
+	if got, want := ids(s.TargetCommands(exe)), []string{"sleep", "exit", "shell", "download", "screenshot"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("windows-exe commands = %v, want %v", got, want)
+	}
+	if got, want := ids(s.TargetCommands(elf)), []string{"sleep", "exit", "shell", "download"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("linux-elf commands = %v, want %v (no screenshot)", got, want)
+	}
+	// Required and default ones, in the schema's order; screenshot is neither.
+	if got, want := s.DefaultCommands(exe), []string{"sleep", "exit", "shell", "download"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("DefaultCommands = %v, want %v", got, want)
+	}
+	if c, ok := s.Command("sleep"); !ok || len(c.Params) != 2 || !c.Required {
+		t.Errorf("Command(sleep) = %+v, %v", c, ok)
+	}
+	if _, ok := s.Command("keylog"); ok {
+		t.Error("unknown command found")
+	}
+	if got := (BuildSchema{}).DefaultCommands(exe); got == nil || len(got) != 0 {
+		t.Errorf("no commands: DefaultCommands = %#v, want an empty list", got)
+	}
+}
+
 func TestValidateBuildSchema_Invalid(t *testing.T) {
 	// Each case names the error it must cause, so none passes for another
 	// reason.
@@ -195,6 +246,27 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		}},
 		{`target "shellcode": duplicate channel "http"`, func(s *BuildSchema) {
 			s.Targets[3].Channels = append(s.Targets[3].Channels, s.Targets[3].Channels[0])
+		}},
+		{"too many commands", func(s *BuildSchema) { s.Commands = make([]BuildCommand, MaxBuildCommands+1) }},
+		{`command "Shell": id must match`, func(s *BuildSchema) { s.Commands[2].ID = "Shell" }},
+		{`command "fs.ls": id must match`, func(s *BuildSchema) { s.Commands[2].ID = "fs.ls" }},
+		{`duplicate command "exit"`, func(s *BuildSchema) { s.Commands = append(s.Commands, s.Commands[1]) }},
+		{`command "exit": label longer than`, func(s *BuildSchema) { s.Commands[1].Label = strings.Repeat("x", MaxLabelLength+1) }},
+		{`command "exit": group longer than`, func(s *BuildSchema) { s.Commands[1].Group = strings.Repeat("x", MaxLabelLength+1) }},
+		{`command "screenshot": target "macos-app" is not one the factory lists`, func(s *BuildSchema) {
+			s.Commands[4].Targets = []string{"macos-app"}
+		}},
+		{`command "screenshot": duplicate target "windows-exe"`, func(s *BuildSchema) {
+			s.Commands[4].Targets = []string{"windows-exe", "windows-exe"}
+		}},
+		{`command "sleep": too many params`, func(s *BuildSchema) { s.Commands[0].Params = make([]FieldSpec, MaxCommandParams+1) }},
+		{`command "sleep": duplicate param "interval"`, func(s *BuildSchema) {
+			s.Commands[0].Params = append(s.Commands[0].Params, s.Commands[0].Params[0])
+		}},
+		{`command "sleep": param "jitter": default`, func(s *BuildSchema) { s.Commands[0].Params[1].Default = 200 }},
+		// A task hands no files to a minion.
+		{`command "shell": param "command": type file is only for build schemas`, func(s *BuildSchema) {
+			s.Commands[2].Params[0].Type = FieldFile
 		}},
 	}
 	for _, c := range cases {

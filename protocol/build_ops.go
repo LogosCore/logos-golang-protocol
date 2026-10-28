@@ -39,7 +39,6 @@ const ChannelEndpointExportV1 = "logos.channel-endpoint.v1"
 const (
 	MaxBuildLogBytes          = 64 << 10
 	MaxBuildWarnings          = 32
-	MaxBuildCapabilities      = 256
 	MaxBuildMessageLength     = 1000 // a progress message, warning or error message
 	MaxArtifactFilenameLength = 255
 	MaxBuildSteps             = 32
@@ -49,7 +48,7 @@ const (
 var (
 	minionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	sha256Pattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	// slugPattern is what capabilities and error codes match.
+	// slugPattern is what error codes match.
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,62}$`)
 	// stepIDPattern is what a build step's id matches: a slug without dots,
 	// so it can key a build's steps in a document.
@@ -109,6 +108,10 @@ type BuildRequest struct {
 	// Values holds every field of the target that has a value or a default.
 	// A file field holds the file's id; the file is in Files.
 	Values map[string]any `json:"values"`
+	// Commands are the ids of the commands the minion is built with: those
+	// the operator picked, the target's required ones among them, in the
+	// schema's order. The minion has these and no others.
+	Commands []string `json:"commands,omitempty"`
 	// Connections are the chosen endpoints, in the order the minion tries
 	// them.
 	Connections []BuildConnection `json:"connections"`
@@ -246,10 +249,7 @@ type BuildResult struct {
 	MinionID string         `json:"minion_id"`
 	Status   BuildStatus    `json:"status"`
 	Artifact *BuildArtifact `json:"artifact,omitempty"`
-	// Capabilities is what the built minion can do, by the names of the
-	// factory's command set.
-	Capabilities []string `json:"capabilities,omitempty"`
-	Warnings     []string `json:"warnings,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 	// Log is the build output: its last MaxBuildLogBytes.
 	Log   string      `json:"log,omitempty"`
 	Error *BuildError `json:"error,omitempty"`
@@ -268,8 +268,9 @@ type BuildResultReply struct {
 // building, since only it knows its build-time constraints beyond these.
 //
 // It returns the problems keyed by where they are (nil when there are none):
-// "values.<key>", "connections[<i>]", "connections[<i>].values.<key>",
-// "files.<id>", or the request member ("minion_id", "target", ...). The
+// "values.<key>", "commands[<i>]", "connections[<i>]",
+// "connections[<i>].values.<key>", "files.<id>", or the request member
+// ("minion_id", "target", "commands", ...). The
 // endpoint params themselves are not checked: core validated them against the
 // channel's schema when it exported them.
 func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
@@ -321,6 +322,9 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 			add("platform", "not a platform of target %q", t.ID)
 		}
 		checkValues("values.", s.TargetFields(t), r.Values)
+		for key, reason := range checkCommands(s, t, r.Commands) {
+			add(key, "%s", reason)
+		}
 
 		if len(r.Connections) == 0 {
 			add("connections", "at least one endpoint is required")
@@ -358,6 +362,37 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 	}
 	if r.Deadline.IsZero() {
 		add("deadline", "is required")
+	}
+	return problems
+}
+
+// checkCommands checks a build's commands for target t: each one of the
+// target's, listed once, with every required one among them. Problems are
+// keyed "commands[<i>]", and "commands" for the required ones missing.
+func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]string {
+	problems := map[string]string{}
+	listed := make(map[string]bool, len(commands))
+	for i, id := range commands {
+		key := fmt.Sprintf("commands[%d]", i)
+		c, ok := s.Command(id)
+		switch {
+		case !ok:
+			problems[key] = fmt.Sprintf("%q is not a command of this factory", id)
+		case !c.For(t.ID):
+			problems[key] = fmt.Sprintf("%q is not a command of target %q", id, t.ID)
+		case listed[id]:
+			problems[key] = fmt.Sprintf("%q is listed twice", id)
+		}
+		listed[id] = true
+	}
+	var missing []string
+	for _, c := range s.TargetCommands(t) {
+		if c.Required && !listed[c.ID] {
+			missing = append(missing, c.ID)
+		}
+	}
+	if len(missing) > 0 {
+		problems["commands"] = fmt.Sprintf("target %q requires %s", t.ID, strings.Join(missing, ", "))
 	}
 	return problems
 }
@@ -426,17 +461,6 @@ func (r BuildResult) Validate() error {
 		}
 	default:
 		return fmt.Errorf("status must be %q or %q", BuildSucceeded, BuildFailed)
-	}
-	if len(r.Capabilities) > MaxBuildCapabilities {
-		return fmt.Errorf("too many capabilities (%d > %d)", len(r.Capabilities), MaxBuildCapabilities)
-	}
-	for i, c := range r.Capabilities {
-		if !slugPattern.MatchString(c) {
-			return fmt.Errorf("capability %q must match %s", c, slugPattern)
-		}
-		if slices.Contains(r.Capabilities[:i], c) {
-			return fmt.Errorf("duplicate capability %q", c)
-		}
 	}
 	if len(r.Warnings) > MaxBuildWarnings {
 		return fmt.Errorf("too many warnings (%d > %d)", len(r.Warnings), MaxBuildWarnings)

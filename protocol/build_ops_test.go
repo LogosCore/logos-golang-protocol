@@ -22,6 +22,7 @@ const (
     "debug": false,
     "icon": "0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55"
   },
+  "commands": ["sleep", "exit", "shell", "download", "screenshot"],
   "connections": [
     {
       "endpoint": {
@@ -55,7 +56,6 @@ const (
     "sha256": "28afe4a10a4a7d593623dcd1eee11f519b056d2bfdda4c7b0bd7a57fc3a5fc8b",
     "media_type": "application/vnd.microsoft.portable-executable"
   },
-  "capabilities": ["shell", "upload", "download"],
   "warnings": ["debug build: strings are not obfuscated"],
   "log": "…"
 }`
@@ -143,6 +143,10 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		{"values.guardrails", func(r *BuildRequest) { r.Values["guardrails"] = []any{"no_sandbox"} }},
 		{"values.kill_date", func(r *BuildRequest) { r.Values["kill_date"] = "2027-01-31" }},
 		{"values.icon", func(r *BuildRequest) { r.Values["icon"] = "not-in-files" }},
+		{"commands[4]", func(r *BuildRequest) { r.Commands[4] = "keylog" }},
+		{"commands[5]", func(r *BuildRequest) { r.Commands = append(r.Commands, "shell") }},
+		{"commands", func(r *BuildRequest) { r.Commands = r.Commands[2:] }}, // without sleep and exit
+		{"commands", func(r *BuildRequest) { r.Commands = nil }},
 		{"values.icon", file(func(f *BuildFile) { f.Size = 262145 })},
 		{"values.icon", file(func(f *BuildFile) { f.Name, f.MediaType = "app.png", "image/png" })},
 		{"files." + iconID, file(func(f *BuildFile) { f.SHA256 = "9f2c…" })},
@@ -172,10 +176,38 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 func TestValidateBuildRequest_TargetFields(t *testing.T) {
 	// The service target has no icon and needs a service name.
 	r := exampleBuildRequest(t)
-	r.Target = "windows-service"
+	r.Target, r.Commands = "windows-service", r.Commands[:4] // no screenshots from a service
 	p := ValidateBuildRequest(exampleBuildSchema(t), r)
 	if p["values.icon"] != "not a declared field" || p["values.service_name"] != "value is required" || len(p) != 2 {
 		t.Fatalf("problems = %v", p)
+	}
+}
+
+func TestValidateBuildRequest_Commands(t *testing.T) {
+	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
+	// A Linux build cannot take screenshots: the command is the exe's only.
+	r.Target, r.Platform = "linux-elf", "linux/amd64"
+	delete(r.Values, "icon")
+	p := ValidateBuildRequest(s, r)
+	if p["commands[4]"] != `"screenshot" is not a command of target "linux-elf"` || len(p) != 1 {
+		t.Fatalf("linux-elf with screenshot: %v", p)
+	}
+	r.Commands = r.Commands[:4]
+	if p := ValidateBuildRequest(s, r); p != nil {
+		t.Fatalf("linux-elf without it: %v", p)
+	}
+	if p := ValidateBuildRequest(s, BuildRequest{Target: "linux-elf"}); p["commands"] != `target "linux-elf" requires sleep, exit` {
+		t.Errorf("no commands: %q", p["commands"])
+	}
+
+	// A factory without commands builds minions with none.
+	s.Commands, r.Commands = nil, nil
+	if p := ValidateBuildRequest(s, r); p != nil {
+		t.Fatalf("no commands declared or asked for: %v", p)
+	}
+	r.Commands = []string{"shell"}
+	if p := ValidateBuildRequest(s, r); p["commands[0]"] == "" || len(p) != 1 {
+		t.Fatalf("a command of a factory without any: %v", p)
 	}
 }
 
@@ -188,7 +220,7 @@ func TestValidateBuildRequest_ShellcodeCannotUseDNS(t *testing.T) {
 	if p := ValidateBuildRequest(s, r); p != nil {
 		t.Fatalf("windows-exe with a dns endpoint: %v", p)
 	}
-	r.Target, r.Values = "shellcode", map[string]any{}
+	r.Target, r.Values, r.Commands = "shellcode", map[string]any{}, r.Commands[:4]
 	if p := ValidateBuildRequest(s, r); p["connections[1]"] == "" || len(p) != 1 {
 		t.Fatalf("shellcode with a dns endpoint: %v", p)
 	}
@@ -257,8 +289,6 @@ func TestBuildResult_Invalid(t *testing.T) {
 		{"plain file name", docBuildSucceeded, func(r *BuildResult) { r.Artifact.Filename = "Win\nTelemetry.exe" }},
 		{"size must not be negative", docBuildSucceeded, func(r *BuildResult) { r.Artifact.Size = -1 }},
 		{"sha256 must be", docBuildSucceeded, func(r *BuildResult) { r.Artifact.SHA256 = "4be1…" }},
-		{`capability "Shell"`, docBuildSucceeded, func(r *BuildResult) { r.Capabilities = []string{"Shell"} }},
-		{`duplicate capability "shell"`, docBuildSucceeded, func(r *BuildResult) { r.Capabilities = []string{"shell", "shell"} }},
 		{"too many warnings", docBuildSucceeded, func(r *BuildResult) { r.Warnings = make([]string, MaxBuildWarnings+1) }},
 		{"log longer than", docBuildSucceeded, func(r *BuildResult) { r.Log = strings.Repeat("x", MaxBuildLogBytes+1) }},
 		{"needs an error code", docBuildFailed, func(r *BuildResult) { r.Error = nil }},
