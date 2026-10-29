@@ -129,6 +129,35 @@ func TestStageMessages(t *testing.T) {
 	}
 }
 
+func TestHello(t *testing.T) {
+	in := HelloItem{T: ItemHello, PID: 4242, OS: "linux", Arch: "amd64", Host: "web01", Integrity: "root",
+		Addrs: []string{"10.0.0.5"}, X: map[string]any{"cfg": map[string]any{"jitter": uint64(3)}}}
+	data, err := MarshalCBOR(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got HelloItem
+	if err := UnmarshalCBOR(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Validate(); err != nil || got.PID != 4242 || got.Host != "web01" {
+		t.Fatalf("hello %+v: %v", got, err)
+	}
+	if _, ok := got.X["cfg"].(map[string]any); !ok {
+		t.Fatalf("x's maps decode as %T, not map[string]any", got.X["cfg"])
+	}
+	for _, bad := range []HelloItem{
+		{OS: "linux", Arch: "amd64"},
+		{PID: 1, Arch: "amd64"},
+		{PID: 1, OS: "linux"},
+		{PID: 1, OS: "linux", Arch: "amd64", Integrity: "admin"},
+	} {
+		if bad.Validate() == nil {
+			t.Fatalf("%+v passed", bad)
+		}
+	}
+}
+
 // The subset: no duplicate keys, no indefinite lengths, no tags, a head with
 // exactly one of id and re.
 func TestCBORRules(t *testing.T) {
