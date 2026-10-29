@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// syncIDPattern is a lowercase UUID, the form of message and minion ids.
+// syncIDPattern is a lowercase UUID, the form of message and build ids.
 var syncIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // MaxChannelInstanceLength caps the instance id a sync request names.
@@ -28,7 +28,7 @@ func ValidateInbound(msg InboundMinionMessage) error {
 // so a server can refuse a request before reading its body: both ids are
 // lowercase UUIDs and the instance is set.
 func ValidateInboundHeaders(msg InboundMinionMessage) error {
-	if err := validateSyncIDs(msg.MessageID, msg.MinionID); err != nil {
+	if err := validateSyncIDs(msg.MessageID, msg.BuildID); err != nil {
 		return err
 	}
 	if strings.TrimSpace(msg.ChannelInstance) == "" {
@@ -43,11 +43,11 @@ func ValidateInboundHeaders(msg InboundMinionMessage) error {
 // ValidateOutbound checks core's reply. Its data may be empty: core has
 // nothing for the minion.
 func ValidateOutbound(msg OutboundMinionMessage) error {
-	return validateSyncIDs(msg.MessageID, msg.MinionID)
+	return validateSyncIDs(msg.MessageID, msg.BuildID)
 }
 
-func validateSyncIDs(messageID, minionID string) error {
-	for _, f := range []struct{ name, value string }{{HeaderMessageID, messageID}, {HeaderMinionID, minionID}} {
+func validateSyncIDs(messageID, buildID string) error {
+	for _, f := range []struct{ name, value string }{{HeaderMessageID, messageID}, {HeaderBuildID, buildID}} {
 		if f.value == "" {
 			return newValidationError(ErrCodeMissingField, f.name+" is required")
 		}

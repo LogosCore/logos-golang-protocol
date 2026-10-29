@@ -45,8 +45,8 @@ const (
 )
 
 var (
-	minionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	sha256Pattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	buildIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	sha256Pattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// slugPattern is what error codes match.
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,62}$`)
 	// stepIDPattern is what a build step's id matches: a slug without dots,
@@ -96,11 +96,11 @@ type ArtifactUpload struct {
 // files are only for the build: a factory must not log them, keep them after
 // the build, or report them in progress or the build log.
 type BuildRequest struct {
-	// MinionID is a lowercase UUIDv4, the id of the build and of the minion
+	// BuildID is a lowercase UUIDv4, the id of the build and of the minion
 	// it makes: every build operation names the build by it, and the minion
-	// sends it on the data plane. A repeated MinionID is the same build: the
+	// sends it on the data plane. A repeated BuildID is the same build: the
 	// factory accepts it again and never builds twice.
-	MinionID      string `json:"minion_id"`
+	BuildID       string `json:"build_id"`
 	Target        string `json:"target"`
 	Platform      string `json:"platform"`
 	SchemaVersion int    `json:"schema_version"`
@@ -128,7 +128,7 @@ type BuildRequest struct {
 // build and works on it. A factory that cannot start it replies with an error
 // instead: CodeValidationFailed, CodeBusy or CodeUnsupportedVersion.
 type BuildReply struct {
-	MinionID string `json:"minion_id"`
+	BuildID  string `json:"build_id"`
 	Accepted bool   `json:"accepted"`
 	// Steps is the factory's plan for this build: the steps it goes through,
 	// in order, for these parameters. Progress names the step it is on, and
@@ -146,10 +146,10 @@ type BuildStep struct {
 	Label string `json:"label"`
 }
 
-// Validate checks a reply: the minion id, and a plan of 1 to MaxBuildSteps
+// Validate checks a reply: the build id, and a plan of 1 to MaxBuildSteps
 // steps with unique, valid ids and labels.
 func (r BuildReply) Validate() error {
-	if err := validateMinionID(r.MinionID); err != nil {
+	if err := validateBuildID(r.BuildID); err != nil {
 		return err
 	}
 	if !r.Accepted {
@@ -188,13 +188,13 @@ func ValidateBuildSteps(steps []BuildStep) error {
 // BuildCancelRequest is the factory.build.cancel payload. The factory stops
 // the build, throws away what it produced and sends no result.
 type BuildCancelRequest struct {
-	MinionID string `json:"minion_id"`
+	BuildID string `json:"build_id"`
 }
 
 // BuildCancelReply is the factory.build.cancel reply payload. Cancelled is
 // true also for a build the factory does not know.
 type BuildCancelReply struct {
-	MinionID  string `json:"minion_id"`
+	BuildID   string `json:"build_id"`
 	Cancelled bool   `json:"cancelled"`
 }
 
@@ -202,7 +202,7 @@ type BuildCancelReply struct {
 // step of its plan. Progress is best effort: a factory does not send a lost
 // one again, and core takes the steps before the one reported as done.
 type BuildProgress struct {
-	MinionID string `json:"minion_id"`
+	BuildID string `json:"build_id"`
 	// Step is the id of the step of the plan the factory is on.
 	Step string `json:"step"`
 	// Message is shown to the operator with the step, e.g. "compiling 3 of
@@ -214,8 +214,8 @@ type BuildProgress struct {
 // CodeNotFound instead when it no longer waits for the build, and the factory
 // stops it.
 type BuildProgressReply struct {
-	MinionID string `json:"minion_id"`
-	Ack      bool   `json:"ack"`
+	BuildID string `json:"build_id"`
+	Ack     bool   `json:"ack"`
 }
 
 // BuildStatus is how a build ended.
@@ -245,7 +245,7 @@ type BuildError struct {
 // before the result is sent. A factory sends the result again until core
 // replies or the deadline passes.
 type BuildResult struct {
-	MinionID string         `json:"minion_id"`
+	BuildID  string         `json:"build_id"`
 	Status   BuildStatus    `json:"status"`
 	Artifact *BuildArtifact `json:"artifact,omitempty"`
 	Warnings []string       `json:"warnings,omitempty"`
@@ -258,7 +258,7 @@ type BuildResult struct {
 // repeated result. Core replies CodeNotFound instead when it no longer waits
 // for the build, and the factory drops the result.
 type BuildResultReply struct {
-	MinionID string `json:"minion_id"`
+	BuildID  string `json:"build_id"`
 	Recorded bool   `json:"recorded"`
 }
 
@@ -269,7 +269,7 @@ type BuildResultReply struct {
 // It returns the problems keyed by where they are (nil when there are none):
 // "values.<key>", "commands[<i>]", "connections[<i>]",
 // "connections[<i>].values.<key>", "files.<id>", or the request member
-// ("minion_id", "target", "commands", ...). The
+// ("build_id", "target", "commands", ...). The
 // endpoint params themselves are not checked: core validated them against the
 // channel's schema when it exported them.
 func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
@@ -281,8 +281,8 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		problems[key] = fmt.Sprintf(format, args...)
 	}
 
-	if !minionIDPattern.MatchString(r.MinionID) {
-		add("minion_id", "must be a lowercase UUIDv4")
+	if !buildIDPattern.MatchString(r.BuildID) {
+		add("build_id", "must be a lowercase UUIDv4")
 	}
 	if r.SchemaVersion != s.Version {
 		add("schema_version", "the factory's build schema is version %d", s.Version)
@@ -419,7 +419,7 @@ func isAbsoluteURL(s string) bool {
 
 // Validate checks a progress report's fields.
 func (p BuildProgress) Validate() error {
-	if err := validateMinionID(p.MinionID); err != nil {
+	if err := validateBuildID(p.BuildID); err != nil {
 		return err
 	}
 	if !stepIDPattern.MatchString(p.Step) {
@@ -434,7 +434,7 @@ func (p BuildProgress) Validate() error {
 // Validate checks a result's fields: a succeeded build has its artifact and
 // no error, a failed one an error and no artifact.
 func (r BuildResult) Validate() error {
-	if err := validateMinionID(r.MinionID); err != nil {
+	if err := validateBuildID(r.BuildID); err != nil {
 		return err
 	}
 	switch r.Status {
@@ -475,9 +475,9 @@ func (r BuildResult) Validate() error {
 	return nil
 }
 
-func validateMinionID(id string) error {
-	if !minionIDPattern.MatchString(id) {
-		return fmt.Errorf("minion_id must be a lowercase UUIDv4")
+func validateBuildID(id string) error {
+	if !buildIDPattern.MatchString(id) {
+		return fmt.Errorf("build_id must be a lowercase UUIDv4")
 	}
 	return nil
 }

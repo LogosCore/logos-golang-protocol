@@ -12,7 +12,7 @@ const (
 	SyncContentType = "application/octet-stream"
 
 	HeaderMessageID       = "Logos-Message-Id"
-	HeaderMinionID        = "Logos-Minion-Id"
+	HeaderBuildID         = "Logos-Build-Id"
 	HeaderChannelInstance = "Logos-Channel-Instance"
 	// HeaderTraceParent is W3C Trace Context's header.
 	HeaderTraceParent = "Traceparent"
@@ -22,8 +22,8 @@ const (
 type InboundMinionMessage struct {
 	// MessageID is unique per request, a UUIDv4 (NewID). Core dedups on it.
 	MessageID string
-	// MinionID is the minion's id: the minion_id of the build that made it.
-	MinionID string
+	// BuildID is the id of the build that made the minion.
+	BuildID string
 	// ChannelInstance is the sending channel's registered instance id.
 	ChannelInstance string
 	// TraceParent is an optional W3C traceparent value.
@@ -37,8 +37,8 @@ type InboundMinionMessage struct {
 type OutboundMinionMessage struct {
 	// MessageID is core's own id for the reply, a UUIDv4.
 	MessageID string
-	// MinionID is the inbound message's MinionID.
-	MinionID string
+	// BuildID is the inbound message's BuildID.
+	BuildID string
 	// TraceParent echoes the inbound message's, when it had one.
 	TraceParent string
 	// Data is ciphertext for the minion. Empty when core has nothing for it,
@@ -50,7 +50,7 @@ type OutboundMinionMessage struct {
 func (m InboundMinionMessage) SetHeaders(h http.Header) {
 	h.Set("Content-Type", SyncContentType)
 	h.Set(HeaderMessageID, m.MessageID)
-	h.Set(HeaderMinionID, m.MinionID)
+	h.Set(HeaderBuildID, m.BuildID)
 	h.Set(HeaderChannelInstance, m.ChannelInstance)
 	if m.TraceParent != "" {
 		h.Set(HeaderTraceParent, m.TraceParent)
@@ -62,7 +62,7 @@ func (m InboundMinionMessage) SetHeaders(h http.Header) {
 func InboundFromHeaders(h http.Header) InboundMinionMessage {
 	return InboundMinionMessage{
 		MessageID:       h.Get(HeaderMessageID),
-		MinionID:        h.Get(HeaderMinionID),
+		BuildID:         h.Get(HeaderBuildID),
 		ChannelInstance: h.Get(HeaderChannelInstance),
 		TraceParent:     h.Get(HeaderTraceParent),
 	}
@@ -75,7 +75,7 @@ func (m OutboundMinionMessage) SetHeaders(h http.Header) {
 		h.Set("Content-Type", SyncContentType)
 	}
 	h.Set(HeaderMessageID, m.MessageID)
-	h.Set(HeaderMinionID, m.MinionID)
+	h.Set(HeaderBuildID, m.BuildID)
 	if m.TraceParent != "" {
 		h.Set(HeaderTraceParent, m.TraceParent)
 	}
@@ -86,7 +86,7 @@ func (m OutboundMinionMessage) SetHeaders(h http.Header) {
 func OutboundFromHeaders(h http.Header) OutboundMinionMessage {
 	return OutboundMinionMessage{
 		MessageID:   h.Get(HeaderMessageID),
-		MinionID:    h.Get(HeaderMinionID),
+		BuildID:     h.Get(HeaderBuildID),
 		TraceParent: h.Get(HeaderTraceParent),
 	}
 }

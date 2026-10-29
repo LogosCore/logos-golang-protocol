@@ -91,7 +91,7 @@ type ReplyEnvelope struct {
 
 // NewID returns a fresh random UUID (version 4) in its canonical lowercase
 // form. It is the one format of the ids Logos mints: message and correlation
-// ids, invocation ids, log stream ids, minion ids. A receiver treats an id as
+// ids, invocation ids, log stream ids, build ids. A receiver treats an id as
 // an opaque string; it reads nothing, not even an order, from it.
 func NewID() string {
 	var b [16]byte

@@ -12,7 +12,7 @@ func TestNewID(t *testing.T) {
 	seen := map[string]bool{}
 	for range 1000 {
 		id := NewID()
-		if !minionIDPattern.MatchString(id) {
+		if !buildIDPattern.MatchString(id) {
 			t.Fatalf("NewID() = %q, want a lowercase UUIDv4", id)
 		}
 		if seen[id] {
@@ -41,7 +41,7 @@ func TestNewReply_EchoesCorrelationAndType(t *testing.T) {
 	if reply.Source.Service != ServiceCore {
 		t.Errorf("source.service = %q, want %q", reply.Source.Service, ServiceCore)
 	}
-	if !minionIDPattern.MatchString(reply.MessageID) {
+	if !buildIDPattern.MatchString(reply.MessageID) {
 		t.Errorf("reply message_id %q is not a UUIDv4", reply.MessageID)
 	}
 	ts, err := time.Parse(time.RFC3339, reply.Timestamp)

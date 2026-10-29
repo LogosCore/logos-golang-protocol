@@ -15,7 +15,7 @@ import (
 func ExampleValidateInbound() {
 	msg := protocol.InboundMinionMessage{
 		MessageID:       protocol.NewID(),
-		MinionID:        "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
+		BuildID:         "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
 		ChannelInstance: "http-channel-1",
 		Data:            []byte{0x8f, 0x00, 0xc3, 0x1e}, // ciphertext: any bytes
 	}
@@ -43,7 +43,7 @@ func ExampleValidateInbound() {
 func ExampleValidateOutbound() {
 	msg := protocol.OutboundMinionMessage{
 		MessageID: protocol.NewID(),
-		MinionID:  "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
+		BuildID:   "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
 	}
 	if err := protocol.ValidateOutbound(msg); err != nil {
 		fmt.Println("unexpected:", err)
