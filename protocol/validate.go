@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// ValidateInbound checks a channel's message: every field is required, the
+// minion's encrypted_data among them.
 func ValidateInbound(msg InboundMinionMessage) error {
 	if err := validateMessage(
 		msg.MessageID,
@@ -15,6 +17,7 @@ func ValidateInbound(msg InboundMinionMessage) error {
 		msg.ID,
 		msg.EncryptedData,
 		TypeInboundMinionMessage,
+		true,
 	); err != nil {
 		return err
 	}
@@ -22,6 +25,9 @@ func ValidateInbound(msg InboundMinionMessage) error {
 	return requireSource(msg.Source)
 }
 
+// ValidateOutbound checks core's reply. Its encrypted_data may be empty: core
+// has nothing for the minion, and the channel relays the empty reply like any
+// other.
 func ValidateOutbound(msg OutboundMinionMessage) error {
 	return validateMessage(
 		msg.MessageID,
@@ -31,6 +37,7 @@ func ValidateOutbound(msg OutboundMinionMessage) error {
 		msg.ID,
 		msg.EncryptedData,
 		TypeOutboundMinionMessage,
+		false,
 	)
 }
 
@@ -42,6 +49,7 @@ func validateMessage(
 	id string,
 	encryptedData string,
 	expectedType string,
+	payloadRequired bool,
 ) error {
 	if err := requireString("message_id", messageID); err != nil {
 		return err
@@ -58,8 +66,10 @@ func validateMessage(
 	if err := requireString("id", id); err != nil {
 		return err
 	}
-	if err := requireString("encrypted_data", encryptedData); err != nil {
-		return err
+	if payloadRequired {
+		if err := requireString("encrypted_data", encryptedData); err != nil {
+			return err
+		}
 	}
 	if msgType != expectedType {
 		return newValidationError(ErrCodeInvalidType, fmt.Sprintf("type must be %q", expectedType))

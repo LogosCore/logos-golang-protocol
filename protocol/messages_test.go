@@ -46,12 +46,23 @@ func TestValidateOutbound_InvalidType(t *testing.T) {
 	assertValidationCode(t, err, ErrCodeInvalidType)
 }
 
-func TestValidateOutbound_MissingEncryptedData(t *testing.T) {
+// A minion always sends something, so inbound needs its encrypted_data.
+func TestValidateInbound_MissingEncryptedData(t *testing.T) {
+	msg := validInboundMessage()
+	msg.EncryptedData = ""
+
+	err := ValidateInbound(msg)
+	assertValidationCode(t, err, ErrCodeMissingField)
+}
+
+// Core's reply may carry nothing: it has nothing for the minion.
+func TestValidateOutbound_EmptyEncryptedData(t *testing.T) {
 	msg := validOutboundMessage()
 	msg.EncryptedData = ""
 
-	err := ValidateOutbound(msg)
-	assertValidationCode(t, err, ErrCodeMissingField)
+	if err := ValidateOutbound(msg); err != nil {
+		t.Fatalf("ValidateOutbound() error = %v, want nil (nothing for the minion)", err)
+	}
 }
 
 // Outbound deliberately carries no source; validation must accept its absence.

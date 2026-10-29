@@ -49,7 +49,8 @@ func ExampleValidateInbound() {
 }
 
 // ExampleValidateOutbound shows core's reply: it answers an existing id and so
-// carries no Source.
+// carries no Source. Its EncryptedData may be empty when core has nothing for
+// the minion.
 func ExampleValidateOutbound() {
 	msg := protocol.OutboundMinionMessage{
 		MessageID:     protocol.NewID(),
@@ -66,6 +67,14 @@ func ExampleValidateOutbound() {
 	}
 	fmt.Println("outbound message is valid")
 
+	msg.EncryptedData = "" // nothing for the minion
+	if err := protocol.ValidateOutbound(msg); err != nil {
+		fmt.Println("unexpected:", err)
+		return
+	}
+	fmt.Println("an empty reply is valid")
+
 	// Output:
 	// outbound message is valid
+	// an empty reply is valid
 }

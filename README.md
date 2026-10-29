@@ -27,6 +27,7 @@ go test -run Example -v ./protocol
   module does, validate it, and read the typed `*ValidationError` code when a
   field is missing.
 - `ExampleValidateOutbound` — core's reply. `OutboundMinionMessage` carries no
-  `Source`: it answers an existing `id`.
+  `Source`: it answers an existing `id`. Its `encrypted_data` may be empty:
+  core has nothing for the minion.
 
 Full API reference: [pkg.go.dev](https://pkg.go.dev/github.com/logoscore/logos-golang-protocol/protocol).

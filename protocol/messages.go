@@ -28,7 +28,8 @@ type InboundMinionMessage struct {
 
 // OutboundMinionMessage is the core-to-channel response. Per the data-plane
 // contract it exposes only id + encrypted_data plus envelope metadata, and
-// deliberately carries no source: it is core's reply for an existing id.
+// deliberately carries no source: it is core's reply for an existing id. An
+// empty EncryptedData means core has nothing for the minion.
 type OutboundMinionMessage struct {
 	MessageID     string      `json:"message_id"`
 	Type          string      `json:"type"`
