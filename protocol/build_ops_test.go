@@ -42,7 +42,7 @@ const (
       "url": "http://logos-seaweedfs-s3:8333/…?X-Amz-Signature=…"
     }
   },
-  "crypto": { "suite": "x25519-xchacha20poly1305", "material": { "…": "…" } },
+  "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "…": "…" } },
   "artifact": { "upload_url": "http://logos-seaweedfs-s3:8333/…?X-Amz-Signature=…", "max_size": 268435456 },
   "deadline": "2026-10-26T14:30:00Z",
   "actor": { "type": "user", "id": "f140266c-…", "name": "admin" }
@@ -99,7 +99,7 @@ func TestBuildRequestDocExample(t *testing.T) {
 		t.Fatalf("problems: %v", p)
 	}
 	if r.Connections[0].Endpoint.Channel.ModuleName != "http" || r.Files[iconID].Name != "app.ico" ||
-		r.Crypto.Suite != "x25519-xchacha20poly1305" || !json.Valid(r.Crypto.Material) {
+		r.Crypto.Suite != "aes-256-cbc-hmac-sha256" || !json.Valid(r.Crypto.Material) {
 		t.Fatalf("decoded: %+v", r)
 	}
 	if want := time.Date(2026, 10, 26, 14, 30, 0, 0, time.UTC); !r.Deadline.Equal(want) {
@@ -246,7 +246,7 @@ func TestValidateBuildRequest_ConnectionFile(t *testing.T) {
 
 func TestValidateBuildRequest_NoCrypto(t *testing.T) {
 	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
-	s.Crypto = nil
+	s.Crypto = ""
 	if p := ValidateBuildRequest(s, r); p["crypto"] == "" || len(p) != 1 {
 		t.Fatalf("crypto for a factory without suites: %v", p)
 	}

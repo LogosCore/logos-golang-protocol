@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -117,7 +116,7 @@ type BuildRequest struct {
 	Connections []BuildConnection `json:"connections"`
 	// Files are the files that values name, by id.
 	Files map[string]BuildFile `json:"files,omitempty"`
-	// Crypto is set when the factory declares crypto suites.
+	// Crypto is set when the factory declares a crypto suite.
 	Crypto   *BuildCrypto   `json:"crypto,omitempty"`
 	Artifact ArtifactUpload `json:"artifact"`
 	// Deadline is when core stops waiting for the result.
@@ -346,12 +345,12 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 	}
 
 	switch {
-	case len(s.Crypto) == 0 && r.Crypto != nil:
-		add("crypto", "the factory declares no crypto suites")
-	case len(s.Crypto) > 0 && r.Crypto == nil:
-		add("crypto", "required: the factory declares crypto suites")
-	case r.Crypto != nil && !slices.Contains(s.Crypto, r.Crypto.Suite):
-		add("crypto", "suite %q is not one the factory declares", r.Crypto.Suite)
+	case s.Crypto == "" && r.Crypto != nil:
+		add("crypto", "the factory declares no crypto suite")
+	case s.Crypto != "" && r.Crypto == nil:
+		add("crypto", "required: the factory declares a crypto suite")
+	case r.Crypto != nil && r.Crypto.Suite != s.Crypto:
+		add("crypto", "suite %q is not the factory's %q", r.Crypto.Suite, s.Crypto)
 	}
 
 	if !isAbsoluteURL(r.Artifact.UploadURL) {

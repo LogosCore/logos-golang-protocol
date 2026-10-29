@@ -29,7 +29,7 @@ const docBuildSchema = `{
     },
     { "module_name": "dns", "versions": [1] }
   ],
-  "crypto": ["x25519-xchacha20poly1305"],
+  "crypto": "aes-256-cbc-hmac-sha256",
   "fields": [
     { "key": "kill_date", "type": "datetime", "label": "Kill date", "group": "Limits", "order": 1 },
     {
@@ -222,8 +222,7 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`channel "http": duplicate field key "method"`, func(s *BuildSchema) {
 			s.Channels[0].Fields = append(s.Channels[0].Fields, s.Channels[0].Fields[0])
 		}},
-		{`crypto suite "X25519!"`, func(s *BuildSchema) { s.Crypto = []string{"X25519!"} }},
-		{`duplicate crypto suite "a"`, func(s *BuildSchema) { s.Crypto = []string{"a", "a"} }},
+		{`crypto suite "X25519!"`, func(s *BuildSchema) { s.Crypto = "X25519!" }},
 		{`field "kill_date": invalid type "blob"`, func(s *BuildSchema) { s.Fields[0].Type = "blob" }},
 		{"at least one target", func(s *BuildSchema) { s.Targets = nil }},
 		{"too many targets", func(s *BuildSchema) { s.Targets = make([]BuildTarget, MaxBuildTargets+1) }},

@@ -36,7 +36,6 @@ const (
 	MaxBuildChannels        = 16
 	MaxBuildChannelVersions = 16 // per channel kind
 	MaxConnectionParams     = 32 // per channel kind
-	MaxBuildCryptoSuites    = 16
 	MaxBuildCommands        = 256
 	MaxCommandParams        = 32 // per command
 )
@@ -65,9 +64,10 @@ type BuildSchema struct {
 	// need a new version.
 	Version  int            `json:"version"`
 	Channels []BuildChannel `json:"channels"`
-	// Crypto lists the payload crypto suites the minions implement; core
-	// picks one it implements and generates the keys. Optional.
-	Crypto []string `json:"crypto,omitempty"`
+	// Crypto is the payload crypto suite the minions implement; core
+	// generates the keys for it. Optional; core refuses a registration whose
+	// suite it does not implement.
+	Crypto string `json:"crypto,omitempty"`
 	// Fields are the build parameters every target shares.
 	Fields  []FieldSpec   `json:"fields,omitempty"`
 	Targets []BuildTarget `json:"targets"`
@@ -261,16 +261,8 @@ func ValidateBuildSchema(s BuildSchema) error {
 		}
 	}
 
-	if len(s.Crypto) > MaxBuildCryptoSuites {
-		return fmt.Errorf("too many crypto suites (%d > %d)", len(s.Crypto), MaxBuildCryptoSuites)
-	}
-	for i, c := range s.Crypto {
-		if !cryptoSuitePattern.MatchString(c) {
-			return fmt.Errorf("crypto suite %q must match %s", c, cryptoSuitePattern)
-		}
-		if slices.Contains(s.Crypto[:i], c) {
-			return fmt.Errorf("duplicate crypto suite %q", c)
-		}
+	if s.Crypto != "" && !cryptoSuitePattern.MatchString(s.Crypto) {
+		return fmt.Errorf("crypto suite %q must match %s", s.Crypto, cryptoSuitePattern)
 	}
 
 	if len(s.Fields) > MaxBuildTargetFields {
