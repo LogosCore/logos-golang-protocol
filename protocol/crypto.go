@@ -10,10 +10,11 @@ package protocol
 const CryptoAES256CBCHMACSHA256 = "aes-256-cbc-hmac-sha256"
 
 // AES256CBCHMACSHA256Material is the key material of
-// CryptoAES256CBCHMACSHA256: two independent 32-byte keys, base64 in JSON.
+// CryptoAES256CBCHMACSHA256: two independent 32-byte keys, base64 in JSON,
+// byte strings in CBOR (a stage_response's keys).
 type AES256CBCHMACSHA256Material struct {
 	// EncKey is the AES-256 key.
-	EncKey []byte `json:"enc_key"`
+	EncKey []byte `json:"enc_key" cbor:"enc_key"`
 	// MACKey is the HMAC-SHA256 key.
-	MACKey []byte `json:"mac_key"`
+	MACKey []byte `json:"mac_key" cbor:"mac_key"`
 }
