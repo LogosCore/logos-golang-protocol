@@ -1,41 +1,92 @@
 package protocol
 
+import "net/http"
+
+// The data-plane sync call: a channel posts a minion's ciphertext to core as
+// the raw HTTP body, with the rest of the message in headers, and core answers
+// the same way (200 with ciphertext for the minion, or 204 with nothing).
 const (
-	TypeInboundMinionMessage  = "inbound.minion_message"
-	TypeOutboundMinionMessage = "outbound.minion_message"
-	VersionV1                 = "1.0"
+	// SyncPath is core's sync endpoint, under core's base URL.
+	SyncPath = "/api/channel/sync"
+	// SyncContentType is the content type of a request or reply body.
+	SyncContentType = "application/octet-stream"
+
+	HeaderMessageID       = "Logos-Message-Id"
+	HeaderMinionID        = "Logos-Minion-Id"
+	HeaderChannelInstance = "Logos-Channel-Instance"
+	// HeaderTraceParent is W3C Trace Context's header.
+	HeaderTraceParent = "Traceparent"
 )
 
-type SourceInfo struct {
-	Module         string `json:"module"`
-	ModuleInstance string `json:"module_instance"`
-	Transport      string `json:"transport"`
-	Tenant         string `json:"tenant"`
-}
-
-type MessageMeta map[string]any
-
+// InboundMinionMessage is one minion message a channel relays to core.
 type InboundMinionMessage struct {
-	MessageID     string      `json:"message_id"`
-	Type          string      `json:"type"`
-	Version       string      `json:"version"`
-	Timestamp     string      `json:"timestamp"`
-	Source        SourceInfo  `json:"source"`
-	ID            string      `json:"id"`
-	EncryptedData string      `json:"encrypted_data"`
-	Meta          MessageMeta `json:"meta,omitempty"`
+	// MessageID is unique per request, a UUIDv4 (NewID). Core dedups on it.
+	MessageID string
+	// MinionID is the minion's id: the minion_id of the build that made it.
+	MinionID string
+	// ChannelInstance is the sending channel's registered instance id.
+	ChannelInstance string
+	// TraceParent is an optional W3C traceparent value.
+	TraceParent string
+	// Data is the minion's ciphertext, as the minion sent it once the channel
+	// has undone its own transport encoding. Never empty.
+	Data []byte
 }
 
-// OutboundMinionMessage is the core-to-channel response. Per the data-plane
-// contract it exposes only id + encrypted_data plus envelope metadata, and
-// deliberately carries no source: it is core's reply for an existing id. An
-// empty EncryptedData means core has nothing for the minion.
+// OutboundMinionMessage is core's reply for one inbound message.
 type OutboundMinionMessage struct {
-	MessageID     string      `json:"message_id"`
-	Type          string      `json:"type"`
-	Version       string      `json:"version"`
-	Timestamp     string      `json:"timestamp"`
-	ID            string      `json:"id"`
-	EncryptedData string      `json:"encrypted_data"`
-	Meta          MessageMeta `json:"meta,omitempty"`
+	// MessageID is core's own id for the reply, a UUIDv4.
+	MessageID string
+	// MinionID is the inbound message's MinionID.
+	MinionID string
+	// TraceParent echoes the inbound message's, when it had one.
+	TraceParent string
+	// Data is ciphertext for the minion. Empty when core has nothing for it,
+	// sent as 204 No Content.
+	Data []byte
+}
+
+// SetHeaders writes m's header fields to h.
+func (m InboundMinionMessage) SetHeaders(h http.Header) {
+	h.Set("Content-Type", SyncContentType)
+	h.Set(HeaderMessageID, m.MessageID)
+	h.Set(HeaderMinionID, m.MinionID)
+	h.Set(HeaderChannelInstance, m.ChannelInstance)
+	if m.TraceParent != "" {
+		h.Set(HeaderTraceParent, m.TraceParent)
+	}
+}
+
+// InboundFromHeaders reads an inbound message's header fields from h. Data
+// is the caller's to fill from the body.
+func InboundFromHeaders(h http.Header) InboundMinionMessage {
+	return InboundMinionMessage{
+		MessageID:       h.Get(HeaderMessageID),
+		MinionID:        h.Get(HeaderMinionID),
+		ChannelInstance: h.Get(HeaderChannelInstance),
+		TraceParent:     h.Get(HeaderTraceParent),
+	}
+}
+
+// SetHeaders writes m's header fields to h, with the content type when m has
+// data.
+func (m OutboundMinionMessage) SetHeaders(h http.Header) {
+	if len(m.Data) > 0 {
+		h.Set("Content-Type", SyncContentType)
+	}
+	h.Set(HeaderMessageID, m.MessageID)
+	h.Set(HeaderMinionID, m.MinionID)
+	if m.TraceParent != "" {
+		h.Set(HeaderTraceParent, m.TraceParent)
+	}
+}
+
+// OutboundFromHeaders reads a reply's header fields from h. Data is the
+// caller's to fill from the body.
+func OutboundFromHeaders(h http.Header) OutboundMinionMessage {
+	return OutboundMinionMessage{
+		MessageID:   h.Get(HeaderMessageID),
+		MinionID:    h.Get(HeaderMinionID),
+		TraceParent: h.Get(HeaderTraceParent),
+	}
 }

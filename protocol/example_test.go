@@ -1,73 +1,50 @@
 package protocol_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"time"
+	"net/http"
 
 	"github.com/logoscore/logos-golang-protocol/protocol"
 )
 
-// ExampleValidateInbound builds a canonical inbound minion message the way a
-// channel module does, then validates it. A failure carries a typed,
-// machine-readable code.
+// ExampleValidateInbound builds a sync request the way a channel module does:
+// the minion's ciphertext as the body, the rest in headers. A failure carries
+// a typed, machine-readable code.
 func ExampleValidateInbound() {
 	msg := protocol.InboundMinionMessage{
-		MessageID: protocol.NewID(),
-		Type:      protocol.TypeInboundMinionMessage,
-		Version:   protocol.VersionV1,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Source: protocol.SourceInfo{
-			Module:         "http-channel",
-			ModuleInstance: "http-channel-1",
-			Transport:      "http",
-			Tenant:         "default",
-		},
-		ID:            "minion-123",
-		EncryptedData: "base64-or-ciphertext",
-		Meta: protocol.MessageMeta{
-			"trace_id": "trace-1",
-		},
+		MessageID:       protocol.NewID(),
+		MinionID:        "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
+		ChannelInstance: "http-channel-1",
+		Data:            []byte{0x8f, 0x00, 0xc3, 0x1e}, // ciphertext: any bytes
 	}
-
 	if err := protocol.ValidateInbound(msg); err != nil {
 		fmt.Println("unexpected:", err)
 		return
 	}
-	fmt.Println("inbound message is valid")
+	req, _ := http.NewRequest(http.MethodPost, "http://core"+protocol.SyncPath, bytes.NewReader(msg.Data))
+	msg.SetHeaders(req.Header)
+	fmt.Println(req.Header.Get("Content-Type"), req.Header.Get(protocol.HeaderChannelInstance))
 
-	msg.EncryptedData = ""
-
+	msg.Data = nil
 	var vErr *protocol.ValidationError
 	if err := protocol.ValidateInbound(msg); errors.As(err, &vErr) {
-		fmt.Printf("validation failed: code=%s message=%s\n", vErr.Code, vErr.Message)
+		fmt.Printf("validation failed: code=%s\n", vErr.Code)
 	}
 
 	// Output:
-	// inbound message is valid
-	// validation failed: code=missing_field message=encrypted_data is required
+	// application/octet-stream http-channel-1
+	// validation failed: code=missing_field
 }
 
-// ExampleValidateOutbound shows core's reply: it answers an existing id and so
-// carries no Source. Its EncryptedData may be empty when core has nothing for
-// the minion.
+// ExampleValidateOutbound shows core's reply. Its Data may be empty when core
+// has nothing for the minion: the reply is then 204 No Content.
 func ExampleValidateOutbound() {
 	msg := protocol.OutboundMinionMessage{
-		MessageID:     protocol.NewID(),
-		Type:          protocol.TypeOutboundMinionMessage,
-		Version:       protocol.VersionV1,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
-		ID:            "minion-123",
-		EncryptedData: "base64-or-ciphertext",
+		MessageID: protocol.NewID(),
+		MinionID:  "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f",
 	}
-
-	if err := protocol.ValidateOutbound(msg); err != nil {
-		fmt.Println("unexpected:", err)
-		return
-	}
-	fmt.Println("outbound message is valid")
-
-	msg.EncryptedData = "" // nothing for the minion
 	if err := protocol.ValidateOutbound(msg); err != nil {
 		fmt.Println("unexpected:", err)
 		return
@@ -75,6 +52,5 @@ func ExampleValidateOutbound() {
 	fmt.Println("an empty reply is valid")
 
 	// Output:
-	// outbound message is valid
 	// an empty reply is valid
 }

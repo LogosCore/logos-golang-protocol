@@ -24,10 +24,10 @@ go test -run Example -v ./protocol
 ```
 
 - `ExampleValidateInbound` — build an `InboundMinionMessage` the way a channel
-  module does, validate it, and read the typed `*ValidationError` code when a
-  field is missing.
-- `ExampleValidateOutbound` — core's reply. `OutboundMinionMessage` carries no
-  `Source`: it answers an existing `id`. Its `encrypted_data` may be empty:
-  core has nothing for the minion.
+  module does (the minion's ciphertext as `Data`, sent as the raw body of the
+  sync call, its ids in `Logos-*` headers via `SetHeaders`), validate it, and
+  read the typed `*ValidationError` code when a field is missing.
+- `ExampleValidateOutbound` — core's reply. Its `Data` may be empty: core has
+  nothing for the minion and answers 204.
 
 Full API reference: [pkg.go.dev](https://pkg.go.dev/github.com/logoscore/logos-golang-protocol/protocol).

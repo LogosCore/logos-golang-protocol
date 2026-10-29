@@ -3,13 +3,13 @@
 // It is the single source of truth shared by core and all modules, covering both
 // planes:
 //
-//   - data-plane: HTTP minion-sync messages (inbound/outbound.minion_message),
-//     carrying opaque encrypted blobs (messages.go)
+//   - data-plane: the HTTP sync call, a minion's ciphertext as the raw body
+//     with the message's ids in headers (messages.go)
 //   - control-plane: the AMQP envelope used by RPC requests, RPC replies, and
 //     events between core and modules (envelope.go)
 //
 // It provides:
-//   - stable message structs for inbound/outbound minion sync flows
+//   - the sync call's message structs, headers and their validation
 //   - the shared control-plane Envelope / ReplyEnvelope and helpers
 //   - constants for canonical type, version, status, and error-code fields
 //   - validation helpers with typed, machine-readable errors

@@ -2,103 +2,58 @@ package protocol
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
-	"time"
 )
 
-// ValidateInbound checks a channel's message: every field is required, the
-// minion's encrypted_data among them.
+// syncIDPattern is a lowercase UUID, the form of message and minion ids.
+var syncIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// MaxChannelInstanceLength caps the instance id a sync request names.
+const MaxChannelInstanceLength = 128
+
+// ValidateInbound checks a channel's message: its headers
+// (ValidateInboundHeaders), and data that is not empty.
 func ValidateInbound(msg InboundMinionMessage) error {
-	if err := validateMessage(
-		msg.MessageID,
-		msg.Type,
-		msg.Version,
-		msg.Timestamp,
-		msg.ID,
-		msg.EncryptedData,
-		TypeInboundMinionMessage,
-		true,
-	); err != nil {
+	if err := ValidateInboundHeaders(msg); err != nil {
 		return err
 	}
-	// Inbound carries the originating channel's source; outbound does not.
-	return requireSource(msg.Source)
+	if len(msg.Data) == 0 {
+		return newValidationError(ErrCodeMissingField, "the body is empty: a minion always sends something")
+	}
+	return nil
 }
 
-// ValidateOutbound checks core's reply. Its encrypted_data may be empty: core
-// has nothing for the minion, and the channel relays the empty reply like any
-// other.
+// ValidateInboundHeaders checks the header fields of a channel's message,
+// so a server can refuse a request before reading its body: both ids are
+// lowercase UUIDs and the instance is set.
+func ValidateInboundHeaders(msg InboundMinionMessage) error {
+	if err := validateSyncIDs(msg.MessageID, msg.MinionID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(msg.ChannelInstance) == "" {
+		return newValidationError(ErrCodeMissingField, HeaderChannelInstance+" is required")
+	}
+	if len(msg.ChannelInstance) > MaxChannelInstanceLength {
+		return newValidationError(ErrCodeInvalidValue, fmt.Sprintf("%s is longer than %d characters", HeaderChannelInstance, MaxChannelInstanceLength))
+	}
+	return nil
+}
+
+// ValidateOutbound checks core's reply. Its data may be empty: core has
+// nothing for the minion.
 func ValidateOutbound(msg OutboundMinionMessage) error {
-	return validateMessage(
-		msg.MessageID,
-		msg.Type,
-		msg.Version,
-		msg.Timestamp,
-		msg.ID,
-		msg.EncryptedData,
-		TypeOutboundMinionMessage,
-		false,
-	)
+	return validateSyncIDs(msg.MessageID, msg.MinionID)
 }
 
-func validateMessage(
-	messageID string,
-	msgType string,
-	version string,
-	timestamp string,
-	id string,
-	encryptedData string,
-	expectedType string,
-	payloadRequired bool,
-) error {
-	if err := requireString("message_id", messageID); err != nil {
-		return err
-	}
-	if err := requireString("type", msgType); err != nil {
-		return err
-	}
-	if err := requireString("version", version); err != nil {
-		return err
-	}
-	if err := requireString("timestamp", timestamp); err != nil {
-		return err
-	}
-	if err := requireString("id", id); err != nil {
-		return err
-	}
-	if payloadRequired {
-		if err := requireString("encrypted_data", encryptedData); err != nil {
-			return err
+func validateSyncIDs(messageID, minionID string) error {
+	for _, f := range []struct{ name, value string }{{HeaderMessageID, messageID}, {HeaderMinionID, minionID}} {
+		if f.value == "" {
+			return newValidationError(ErrCodeMissingField, f.name+" is required")
 		}
-	}
-	if msgType != expectedType {
-		return newValidationError(ErrCodeInvalidType, fmt.Sprintf("type must be %q", expectedType))
-	}
-	if _, err := time.Parse(time.RFC3339, timestamp); err != nil {
-		return newValidationError(ErrCodeInvalidTimestamp, "timestamp must be RFC3339")
-	}
-	return nil
-}
-
-func requireSource(source SourceInfo) error {
-	if err := requireString("source.module", source.Module); err != nil {
-		return err
-	}
-	if err := requireString("source.module_instance", source.ModuleInstance); err != nil {
-		return err
-	}
-	if err := requireString("source.transport", source.Transport); err != nil {
-		return err
-	}
-	if err := requireString("source.tenant", source.Tenant); err != nil {
-		return err
-	}
-	return nil
-}
-
-func requireString(field, value string) error {
-	if strings.TrimSpace(value) == "" {
-		return newValidationError(ErrCodeMissingField, fmt.Sprintf("%s is required", field))
+		if !syncIDPattern.MatchString(f.value) {
+			return newValidationError(ErrCodeInvalidValue, f.name+" must be a lowercase UUID")
+		}
 	}
 	return nil
 }

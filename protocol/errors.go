@@ -6,9 +6,8 @@ import (
 )
 
 const (
-	ErrCodeMissingField     = "missing_field"
-	ErrCodeInvalidType      = "invalid_type"
-	ErrCodeInvalidTimestamp = "invalid_timestamp"
+	ErrCodeMissingField = "missing_field"
+	ErrCodeInvalidValue = "invalid_value"
 )
 
 type ValidationError struct {

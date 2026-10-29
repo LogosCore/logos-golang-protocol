@@ -2,124 +2,85 @@ package protocol
 
 import (
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
-	"time"
 )
 
-func TestValidateInbound_Valid(t *testing.T) {
-	msg := validInboundMessage()
-
-	if err := ValidateInbound(msg); err != nil {
-		t.Fatalf("ValidateInbound() error = %v, want nil", err)
-	}
-}
-
-func TestValidateOutbound_Valid(t *testing.T) {
-	msg := validOutboundMessage()
-
-	if err := ValidateOutbound(msg); err != nil {
-		t.Fatalf("ValidateOutbound() error = %v, want nil", err)
-	}
-}
-
-func TestValidateInbound_MissingRequiredField(t *testing.T) {
-	msg := validInboundMessage()
-	msg.MessageID = ""
-
-	err := ValidateInbound(msg)
-	assertValidationCode(t, err, ErrCodeMissingField)
-}
-
-func TestValidateInbound_InvalidTimestamp(t *testing.T) {
-	msg := validInboundMessage()
-	msg.Timestamp = "not-a-timestamp"
-
-	err := ValidateInbound(msg)
-	assertValidationCode(t, err, ErrCodeInvalidTimestamp)
-}
-
-func TestValidateOutbound_InvalidType(t *testing.T) {
-	msg := validOutboundMessage()
-	msg.Type = TypeInboundMinionMessage
-
-	err := ValidateOutbound(msg)
-	assertValidationCode(t, err, ErrCodeInvalidType)
-}
-
-// A minion always sends something, so inbound needs its encrypted_data.
-func TestValidateInbound_MissingEncryptedData(t *testing.T) {
-	msg := validInboundMessage()
-	msg.EncryptedData = ""
-
-	err := ValidateInbound(msg)
-	assertValidationCode(t, err, ErrCodeMissingField)
-}
-
-// Core's reply may carry nothing: it has nothing for the minion.
-func TestValidateOutbound_EmptyEncryptedData(t *testing.T) {
-	msg := validOutboundMessage()
-	msg.EncryptedData = ""
-
-	if err := ValidateOutbound(msg); err != nil {
-		t.Fatalf("ValidateOutbound() error = %v, want nil (nothing for the minion)", err)
-	}
-}
-
-// Outbound deliberately carries no source; validation must accept its absence.
-func TestValidateOutbound_NoSourceRequired(t *testing.T) {
-	msg := validOutboundMessage()
-
-	if err := ValidateOutbound(msg); err != nil {
-		t.Fatalf("ValidateOutbound() error = %v, want nil (outbound has no source)", err)
-	}
-}
-
-func assertValidationCode(t *testing.T, err error, wantCode string) {
-	t.Helper()
-
-	if err == nil {
-		t.Fatalf("expected validation error with code %q, got nil", wantCode)
-	}
-
-	var vErr *ValidationError
-	if !errors.As(err, &vErr) {
-		t.Fatalf("expected *ValidationError, got %T", err)
-	}
-	if vErr.Code != wantCode {
-		t.Fatalf("validation code = %q, want %q", vErr.Code, wantCode)
-	}
-}
+const testMinionID = "5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f"
 
 func validInboundMessage() InboundMinionMessage {
 	return InboundMinionMessage{
-		MessageID: "msg-in-1",
-		Type:      TypeInboundMinionMessage,
-		Version:   VersionV1,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Source: SourceInfo{
-			Module:         "channel-http",
-			ModuleInstance: "channel-http-1",
-			Transport:      "ws",
-			Tenant:         "default",
-		},
-		ID:            "s-2b77df",
-		EncryptedData: "ciphertext",
-		Meta: MessageMeta{
-			"trace_id": "trace-1",
-		},
+		MessageID:       "c4ca4238-a0b9-4382-8dcc-509a6f75849b",
+		MinionID:        testMinionID,
+		ChannelInstance: "http-main",
+		TraceParent:     "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		Data:            []byte{0xff, 0xfe, 0x00, 0x80}, // not UTF-8: raw bytes travel as they are
 	}
 }
 
-func validOutboundMessage() OutboundMinionMessage {
-	return OutboundMinionMessage{
-		MessageID:     "msg-out-1",
-		Type:          TypeOutboundMinionMessage,
-		Version:       VersionV1,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
-		ID:            "s-2b77df",
-		EncryptedData: "ciphertext",
-		Meta: MessageMeta{
-			"trace_id": "trace-2",
-		},
+func TestValidateInbound(t *testing.T) {
+	if err := ValidateInbound(validInboundMessage()); err != nil {
+		t.Fatalf("valid message: %v", err)
+	}
+	for name, c := range map[string]struct {
+		mutate func(m *InboundMinionMessage)
+		code   string
+	}{
+		"no message id":     {func(m *InboundMinionMessage) { m.MessageID = "" }, ErrCodeMissingField},
+		"message id format": {func(m *InboundMinionMessage) { m.MessageID = "msg-1" }, ErrCodeInvalidValue},
+		"no minion id":      {func(m *InboundMinionMessage) { m.MinionID = "" }, ErrCodeMissingField},
+		"uppercase minion":  {func(m *InboundMinionMessage) { m.MinionID = strings.ToUpper(testMinionID) }, ErrCodeInvalidValue},
+		"no instance":       {func(m *InboundMinionMessage) { m.ChannelInstance = " " }, ErrCodeMissingField},
+		"long instance":     {func(m *InboundMinionMessage) { m.ChannelInstance = strings.Repeat("a", MaxChannelInstanceLength+1) }, ErrCodeInvalidValue},
+		"empty body":        {func(m *InboundMinionMessage) { m.Data = nil }, ErrCodeMissingField},
+	} {
+		m := validInboundMessage()
+		c.mutate(&m)
+		var vErr *ValidationError
+		if err := ValidateInbound(m); !errors.As(err, &vErr) || vErr.Code != c.code {
+			t.Errorf("%s: %v, want code %s", name, err, c.code)
+		}
+	}
+}
+
+// Core's reply may carry nothing: it has nothing for the minion.
+func TestValidateOutbound(t *testing.T) {
+	m := OutboundMinionMessage{MessageID: "3c9d2b7e-5a41-4f08-b6e2-91d7c0a4e8f3", MinionID: testMinionID}
+	if err := ValidateOutbound(m); err != nil {
+		t.Fatalf("empty reply: %v", err)
+	}
+	m.MinionID = ""
+	if !IsValidationCode(ValidateOutbound(m), ErrCodeMissingField) {
+		t.Fatal("a reply without a minion id passed")
+	}
+}
+
+func TestHeadersRoundTrip(t *testing.T) {
+	in := validInboundMessage()
+	h := http.Header{}
+	in.SetHeaders(h)
+	if h.Get("Content-Type") != SyncContentType {
+		t.Fatalf("content type %q", h.Get("Content-Type"))
+	}
+	got := InboundFromHeaders(h)
+	got.Data = in.Data
+	if got.MessageID != in.MessageID || got.MinionID != in.MinionID || got.ChannelInstance != in.ChannelInstance || got.TraceParent != in.TraceParent {
+		t.Fatalf("inbound %+v, want %+v", got, in)
+	}
+
+	out := OutboundMinionMessage{MessageID: "3c9d2b7e-5a41-4f08-b6e2-91d7c0a4e8f3", MinionID: testMinionID}
+	h = http.Header{}
+	out.SetHeaders(h)
+	if h.Get("Content-Type") != "" || h.Get(HeaderTraceParent) != "" {
+		t.Fatalf("empty reply headers %v: no content type, no traceparent", h)
+	}
+	out.Data = []byte{1}
+	out.TraceParent = in.TraceParent
+	h = http.Header{}
+	out.SetHeaders(h)
+	if back := OutboundFromHeaders(h); back.MessageID != out.MessageID || back.MinionID != out.MinionID ||
+		back.TraceParent != out.TraceParent || h.Get("Content-Type") != SyncContentType {
+		t.Fatalf("outbound %+v, headers %v", back, h)
 	}
 }
