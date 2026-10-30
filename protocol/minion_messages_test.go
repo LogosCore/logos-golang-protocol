@@ -151,6 +151,7 @@ func TestHello(t *testing.T) {
 		{PID: 1, Arch: "amd64"},
 		{PID: 1, OS: "linux"},
 		{PID: 1, OS: "linux", Arch: "amd64", Integrity: "admin"},
+		{PID: 1, OS: "linux", Arch: "amd64", SID: []byte{1, 2, 3}},
 	} {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v passed", bad)

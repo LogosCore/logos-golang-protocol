@@ -173,6 +173,23 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 	}
 }
 
+// A persisted session goes only to a factory whose minions claim one.
+func TestValidateBuildRequest_SessionID(t *testing.T) {
+	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
+	r.SessionID = "8fba1ac4-b8e7-46ca-b96e-bdddc9e52906"
+	if p := ValidateBuildRequest(s, r); p["session_id"] == "" || len(p) != 1 {
+		t.Fatalf("a factory without persisted sessions: %v", p)
+	}
+	s.PersistedSessions = true
+	if p := ValidateBuildRequest(s, r); p != nil {
+		t.Fatalf("with them: %v", p)
+	}
+	r.SessionID = "not-a-uuid"
+	if p := ValidateBuildRequest(s, r); p["session_id"] == "" {
+		t.Fatalf("a bad session id passed")
+	}
+}
+
 func TestValidateBuildRequest_TargetFields(t *testing.T) {
 	// The service target has no icon and needs a service name.
 	r := exampleBuildRequest(t)
