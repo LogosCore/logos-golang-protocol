@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -226,5 +227,107 @@ func TestCBORRules(t *testing.T) {
 	}
 	if err := ValidateMessageHead(1, nil, id, 1); err != nil {
 		t.Errorf("a reply: %v", err)
+	}
+}
+
+func TestTaskItems(t *testing.T) {
+	id := bytes.Repeat([]byte{7}, 16)
+	task := TaskItem{T: ItemTask, Task: id, Cmd: "shell", Args: map[string]any{"command": "whoami", "timeout": uint64(30000)}}
+	raw, err := MarshalCBOR(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back TaskItem
+	if err := UnmarshalCBOR(raw, &back); err != nil || back.Validate() != nil || ItemType(raw) != ItemTask {
+		t.Fatalf("task round trip: %+v, %v", back, err)
+	}
+	if back.Args["command"] != "whoami" {
+		t.Fatalf("args %v", back.Args)
+	}
+	for name, bad := range map[string]TaskItem{
+		"short id": {T: ItemTask, Task: id[:8], Cmd: "ls"},
+		"bad cmd":  {T: ItemTask, Task: id, Cmd: "Shell!"},
+	} {
+		if bad.Validate() == nil {
+			t.Errorf("%s: valid", name)
+		}
+	}
+	if (CancelItem{T: ItemCancel, Task: id}).Validate() != nil || (CancelItem{T: ItemCancel}).Validate() == nil {
+		t.Fatal("cancel validation")
+	}
+}
+
+func TestResultItems(t *testing.T) {
+	id := bytes.Repeat([]byte{9}, 16)
+	ok, exit := true, int64(1)
+	done := ResultItem{T: ItemResult, Task: id, Seq: 2, Done: true, OK: &ok, Out: []byte{0xff, 'a'}, Exit: &exit,
+		Data: map[string]any{"entries": []any{"a", "b"}}}
+	raw, err := MarshalCBOR(done)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ResultItem
+	if err := UnmarshalCBOR(raw, &back); err != nil || back.Validate() != nil {
+		t.Fatalf("result round trip: %+v, %v", back, err)
+	}
+	if !bytes.Equal(back.Out, done.Out) || *back.Exit != 1 || !*back.OK || back.Seq != 2 {
+		t.Fatalf("result %+v", back)
+	}
+	if (ResultItem{T: ItemResult, Task: id, Out: []byte("part")}).Validate() != nil {
+		t.Fatal("a part before the last is valid without ok")
+	}
+	for name, bad := range map[string]ResultItem{
+		"short id":         {T: ItemResult, Task: id[:3], Done: true, OK: &ok},
+		"done without ok":  {T: ItemResult, Task: id, Done: true},
+		"ok before done":   {T: ItemResult, Task: id, OK: &ok},
+		"exit before done": {T: ItemResult, Task: id, Exit: &exit},
+	} {
+		if bad.Validate() == nil {
+			t.Errorf("%s: valid", name)
+		}
+	}
+}
+
+func TestAckItems(t *testing.T) {
+	id := bytes.Repeat([]byte{1}, 16)
+	next := uint64(512)
+	for name, c := range map[string]struct {
+		ack AckItem
+		ok  bool
+	}{
+		"tasks":             {AckItem{T: ItemAck, Tasks: [][]byte{id, id}}, true},
+		"transfer":          {AckItem{T: ItemAck, Xfer: id, Next: &next}, true},
+		"short task":        {AckItem{T: ItemAck, Tasks: [][]byte{id[:4]}}, false},
+		"xfer without next": {AckItem{T: ItemAck, Xfer: id}, false},
+	} {
+		if got := c.ack.Validate() == nil; got != c.ok {
+			t.Errorf("%s: valid=%v", name, got)
+		}
+	}
+}
+
+// A result's data may hold more than a message's 256 items: an ls of a big
+// directory. The 256 is the message's items, checked by ValidateMessageHead.
+func TestResultDataPastTheItemLimit(t *testing.T) {
+	entries := make([]any, 1000)
+	for i := range entries {
+		entries[i] = map[string]any{"name": fmt.Sprintf("f%d", i)}
+	}
+	ok := true
+	raw, err := MarshalCBOR(ResultItem{T: ItemResult, Task: make([]byte, 16), Done: true, OK: &ok, Data: map[string]any{"entries": entries}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := MarshalCBOR(MinionMessage{V: MinionMessageV1, ID: make([]byte, 16), Items: []cbor.RawMessage{raw}})
+	var back MinionMessage
+	if err := UnmarshalCBOR(msg, &back); err != nil {
+		t.Fatalf("a message with a 1000-entry result: %v", err)
+	}
+	var r ResultItem
+	if err := UnmarshalCBOR(back.Items[0], &r); err != nil || len(r.Data["entries"].([]any)) != 1000 {
+		t.Fatalf("result: %v", err)
+	}
+	if ValidateMessageHead(MinionMessageV1, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
+		t.Fatal("more than 256 items passed")
 	}
 }
