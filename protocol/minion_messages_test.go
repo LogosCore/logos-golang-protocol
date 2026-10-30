@@ -152,10 +152,26 @@ func TestHello(t *testing.T) {
 		{PID: 1, OS: "linux"},
 		{PID: 1, OS: "linux", Arch: "amd64", Integrity: "admin"},
 		{PID: 1, OS: "linux", Arch: "amd64", SID: []byte{1, 2, 3}},
+		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 0}},
+		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 1000, Jitter: 101}},
 	} {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v passed", bad)
 		}
+	}
+}
+
+func TestSleepUpdate(t *testing.T) {
+	data, _ := MarshalCBOR(SleepUpdateItem{T: ItemSleepUpdate, Interval: 60000, Jitter: 20})
+	var got SleepUpdateItem
+	if err := UnmarshalCBOR(data, &got); err != nil || got.Sleep() != (Sleep{Interval: 60000, Jitter: 20}) || got.Sleep().Validate() != nil {
+		t.Fatalf("%+v: %v", got, err)
+	}
+	h := HelloItem{T: ItemHello, PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 1000, Jitter: 20}}
+	data, _ = MarshalCBOR(h)
+	var back HelloItem
+	if err := UnmarshalCBOR(data, &back); err != nil || back.Sleep == nil || *back.Sleep != *h.Sleep || back.Validate() != nil {
+		t.Fatalf("hello's sleep: %+v %v", back.Sleep, err)
 	}
 }
 
