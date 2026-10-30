@@ -158,6 +158,24 @@ func TestHello(t *testing.T) {
 	}
 }
 
+func TestGetTasks(t *testing.T) {
+	one := uint64(1)
+	data, _ := MarshalCBOR(GetTasksItem{T: ItemGetTasks, Max: &one})
+	var got GetTasksItem
+	if err := UnmarshalCBOR(data, &got); err != nil || got.Max == nil || *got.Max != 1 || got.Validate() != nil {
+		t.Fatalf("%+v: %v", got, err)
+	}
+	data, _ = MarshalCBOR(GetTasksItem{T: ItemGetTasks})
+	got = GetTasksItem{}
+	if err := UnmarshalCBOR(data, &got); err != nil || got.Max != nil {
+		t.Fatalf("no max: %+v %v", got, err)
+	}
+	zero := uint64(0)
+	if (GetTasksItem{T: ItemGetTasks, Max: &zero}).Validate() == nil {
+		t.Fatal("max 0 passed")
+	}
+}
+
 // The subset: no duplicate keys, no indefinite lengths, no tags, a head with
 // exactly one of id and re.
 func TestCBORRules(t *testing.T) {
