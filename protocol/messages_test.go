@@ -60,12 +60,19 @@ func TestHeadersRoundTrip(t *testing.T) {
 	in := validInboundMessage()
 	h := http.Header{}
 	in.SetHeaders(h)
+	if _, set := h[HeaderPeerAddress]; set {
+		t.Fatal("no peer address, yet the header is set")
+	}
+	in.PeerAddress = "203.0.113.7"
+	h = http.Header{}
+	in.SetHeaders(h)
 	if h.Get("Content-Type") != SyncContentType {
 		t.Fatalf("content type %q", h.Get("Content-Type"))
 	}
 	got := InboundFromHeaders(h)
 	got.Data = in.Data
-	if got.MessageID != in.MessageID || got.BuildID != in.BuildID || got.ChannelInstance != in.ChannelInstance || got.TraceParent != in.TraceParent {
+	if got.MessageID != in.MessageID || got.BuildID != in.BuildID || got.ChannelInstance != in.ChannelInstance || got.TraceParent != in.TraceParent ||
+		got.PeerAddress != in.PeerAddress {
 		t.Fatalf("inbound %+v, want %+v", got, in)
 	}
 
