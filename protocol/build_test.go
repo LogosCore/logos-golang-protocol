@@ -249,6 +249,7 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{"too many commands", func(s *BuildSchema) { s.Commands = make([]BuildCommand, MaxBuildCommands+1) }},
 		{`command "Shell": id must match`, func(s *BuildSchema) { s.Commands[2].ID = "Shell" }},
 		{`command "fs.ls": id must match`, func(s *BuildSchema) { s.Commands[2].ID = "fs.ls" }},
+		{`command "help": "help" is core's own command`, func(s *BuildSchema) { s.Commands[2].ID = "help" }},
 		{`duplicate command "exit"`, func(s *BuildSchema) { s.Commands = append(s.Commands, s.Commands[1]) }},
 		{`command "exit": label longer than`, func(s *BuildSchema) { s.Commands[1].Label = strings.Repeat("x", MaxLabelLength+1) }},
 		{`command "screenshot": target "macos-app" is not one the factory lists`, func(s *BuildSchema) {
