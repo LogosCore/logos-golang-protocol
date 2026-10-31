@@ -111,3 +111,29 @@ func TestReadFileUpload(t *testing.T) {
 		t.Fatal("no path: taken")
 	}
 }
+
+func TestStreamItems(t *testing.T) {
+	next := uint64(0)
+	if err := (AckItem{T: ItemAck, Xfer: make([]byte, 16), Next: &next, Hold: true}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (AckItem{T: ItemAck, Hold: true}).Validate(); err == nil {
+		t.Fatal("hold without xfer: taken")
+	}
+	// The announcement: the first chunk, no data.
+	total := uint64(5 << 30)
+	if err := (ChunkItem{T: ItemChunk, Xfer: make([]byte, 16), Total: &total, Task: make([]byte, 16), Name: "/a"}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := ResultData(FileStream{Xfer: make([]byte, 16), Path: "/a", Size: total})
+	if f, err := ReadFileStream(0, data); err != nil || f.Size != total || f.SHA256 != nil {
+		t.Fatalf("%+v %v", f, err)
+	}
+	bad, _ := ResultData(FileStream{Xfer: make([]byte, 16), Path: "/a", SHA256: []byte{1}})
+	if _, err := ReadFileStream(0, bad); err == nil {
+		t.Fatal("a short sha256: taken")
+	}
+	if a, ok := KnownAction(ActionStreamFile); !ok || a.Result != ResultFileStream {
+		t.Fatal("stream_file")
+	}
+}
