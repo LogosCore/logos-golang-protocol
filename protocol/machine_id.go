@@ -17,8 +17,9 @@ import (
 //  1. a firmware or hardware UUID: MachineSMBIOSUUID (Linux product_uuid,
 //     as root; Windows through GetSystemFirmwareTable), MachineMacUUID,
 //     MachineBSDHostUUID;
-//  2. the OS install's id: MachineLinuxMachineID, MachineWinMachineGUID;
-//  3. in a container, the container's id: MachineContainer;
+//  2. in a container, the container's id (MachineContainer): an image's
+//     install id is every container's;
+//  3. the OS install's id: MachineLinuxMachineID, MachineWinMachineGUID;
 //  4. a domain machine's identity: MachineDomainSID;
 //  5. the host name: MachineHostname;
 //  6. a random id the minion keeps (a file, a key): MachineKept;
