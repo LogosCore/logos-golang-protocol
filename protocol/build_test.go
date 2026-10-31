@@ -264,7 +264,7 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		}},
 		{`command "sleep": param "jitter": default`, func(s *BuildSchema) { s.Commands[0].Params[1].Default = 200 }},
 		// A task sends its minion one file at most, and a file has no default.
-		{`command "shell": param "command2": a command takes one file param at most`, func(s *BuildSchema) {
+		{`command "shell": param "command2": a command takes one file or stream param at most`, func(s *BuildSchema) {
 			s.Commands[2].Params[0].Type = FieldFile
 			s.Commands[2].Params = append(s.Commands[2].Params, FieldSpec{Key: "command2", Type: FieldFile})
 		}},

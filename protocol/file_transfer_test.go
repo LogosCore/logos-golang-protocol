@@ -63,7 +63,7 @@ func TestCommandFileParam(t *testing.T) {
 		t.Fatalf("a file param: %v", err)
 	}
 	two := BuildCommand{ID: "put", Params: []FieldSpec{file, {Key: "other", Type: FieldFile}}}
-	if err := validateBuildCommand(two, nil); err == nil || !strings.Contains(err.Error(), "one file param at most") {
+	if err := validateBuildCommand(two, nil); err == nil || !strings.Contains(err.Error(), "one file or stream param at most") {
 		t.Fatalf("two: %v", err)
 	}
 	if err := validateFieldSpec(file); err == nil {
@@ -135,5 +135,40 @@ func TestStreamItems(t *testing.T) {
 	}
 	if a, ok := KnownAction(ActionStreamFile); !ok || a.Result != ResultFileStream {
 		t.Fatal("stream_file")
+	}
+}
+
+// A stream param: a command's only, a file name, no default; the offer
+// says neither size nor sha256.
+func TestStreamParam(t *testing.T) {
+	up := BuildCommand{ID: "stream_upload", Result: ResultFileUpload, Action: ActionUploadStream, Params: []FieldSpec{
+		{Key: "stream", Type: FieldStream, Required: true}, {Key: "path", Type: FieldString, Required: true},
+		{Key: "overwrite", Type: FieldBool, Default: false}}}
+	if err := validateBuildCommand(up, nil); err != nil {
+		t.Fatalf("upload_stream: %v", err)
+	}
+	both := BuildCommand{ID: "x", Params: []FieldSpec{{Key: "a", Type: FieldStream}, {Key: "b", Type: FieldFile}}}
+	if err := validateBuildCommand(both, nil); err == nil || !strings.Contains(err.Error(), "one file or stream param") {
+		t.Fatalf("a stream and a file: %v", err)
+	}
+	if err := validateBuildCommand(BuildCommand{ID: "x", Params: []FieldSpec{{Key: "a", Type: FieldStream, Default: "x"}}}, nil); err == nil {
+		t.Fatal("a stream with a default: taken")
+	}
+	if err := validateFieldSpec(FieldSpec{Key: "a", Type: FieldStream}); err == nil {
+		t.Fatal("a stream outside a command: taken")
+	}
+	f := FieldSpec{Key: "stream", Type: FieldStream}
+	for v, ok := range map[string]bool{"big.iso": true, "": false, "../a": false, `c:\a`: false} {
+		if err := ValidateValue(f, v); (err == nil) != ok {
+			t.Errorf("%q: %v", v, err)
+		}
+	}
+	offer := FileOffer{Xfer: make([]byte, 16), Name: "big.iso", Stream: true}
+	if err := offer.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	offer.Size = 5
+	if err := offer.Validate(); err == nil {
+		t.Fatal("a stream offer with a size: taken")
 	}
 }
