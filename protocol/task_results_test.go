@@ -8,9 +8,12 @@ import (
 func TestCommandHandlers(t *testing.T) {
 	path := FieldSpec{Key: "path", Type: FieldString, Default: "."}
 	for name, c := range map[string]BuildCommand{
-		"none":                {ID: "ls"},
-		"dir_listing":         {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{path}},
-		"dir_listing, more":   {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "all", Type: FieldBool}, path}},
+		"none":              {ID: "ls"},
+		"dir_listing":       {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{path}},
+		"dir_listing, more": {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "all", Type: FieldBool, Default: false}, path}},
+		"dir_listing, more, required with a default": {ID: "ls", Handler: HandlerDirListing,
+			Params: []FieldSpec{path, {Key: "depth", Type: FieldInt, Required: true, Default: 1}}},
+		"path required":       {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "path", Type: FieldString, Required: true}}},
 		"one this lacks":      {ID: "ps", Handler: "process_list"},
 		"one this lacks, too": {ID: "ps", Handler: "future_thing_v2", Params: []FieldSpec{path}},
 	} {
@@ -25,6 +28,10 @@ func TestCommandHandlers(t *testing.T) {
 		"bad id":            {BuildCommand{ID: "ls", Handler: "Dir-Listing"}, "handler must match"},
 		"no path":           {BuildCommand{ID: "ls", Handler: HandlerDirListing}, `takes a string param "path"`},
 		"path not a string": {BuildCommand{ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "path", Type: FieldInt}}}, `takes a string param "path"`},
+		"more, optional without a default": {BuildCommand{ID: "ls", Handler: HandlerDirListing,
+			Params: []FieldSpec{path, {Key: "all", Type: FieldBool}}}, `param "all" needs a default`},
+		"more, required without a default": {BuildCommand{ID: "ls", Handler: HandlerDirListing,
+			Params: []FieldSpec{{Key: "depth", Type: FieldInt, Required: true}, path}}, `param "depth" needs a default`},
 	} {
 		err := validateBuildCommand(tc.c, nil)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
