@@ -27,7 +27,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		want string
 	}{
 		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, file_download, file_stream, file_upload)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (download_file, list_dir, stream_file, upload_file, upload_stream)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, upload_file, upload_stream)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -50,6 +50,16 @@ func TestCommandResultsAndActions(t *testing.T) {
 	upload.Params = upload.Params[1:]
 	if err := validateBuildCommand(upload, nil); err == nil || !strings.Contains(err.Error(), `takes a file param "file"`) {
 		t.Errorf("upload_file without its file: %v", err)
+	}
+	// An action with no result: the command has none either.
+	rm := BuildCommand{ID: "rm", Action: ActionDeletePath, Params: []FieldSpec{
+		{Key: "path", Type: FieldString, Required: true}, {Key: "recursive", Type: FieldBool, Default: false}}}
+	if err := validateBuildCommand(rm, nil); err != nil {
+		t.Errorf("delete_path: %v", err)
+	}
+	rm.Result = ResultDirListing
+	if err := validateBuildCommand(rm, nil); err == nil {
+		t.Error("delete_path with a result: taken")
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")
