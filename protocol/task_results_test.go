@@ -5,17 +5,18 @@ import (
 	"testing"
 )
 
-func TestCommandHandlers(t *testing.T) {
+func TestCommandResultsAndActions(t *testing.T) {
 	path := FieldSpec{Key: "path", Type: FieldString, Default: "."}
+	listDir := func(params ...FieldSpec) BuildCommand {
+		return BuildCommand{ID: "ls", Result: ResultDirListing, Action: ActionListDir, Params: params}
+	}
 	for name, c := range map[string]BuildCommand{
-		"none":              {ID: "ls"},
-		"dir_listing":       {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{path}},
-		"dir_listing, more": {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "all", Type: FieldBool, Default: false}, path}},
-		"dir_listing, more, required with a default": {ID: "ls", Handler: HandlerDirListing,
-			Params: []FieldSpec{path, {Key: "depth", Type: FieldInt, Required: true, Default: 1}}},
-		"path required":       {ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "path", Type: FieldString, Required: true}}},
-		"one this lacks":      {ID: "ps", Handler: "process_list"},
-		"one this lacks, too": {ID: "ps", Handler: "future_thing_v2", Params: []FieldSpec{path}},
+		"neither":                 {ID: "ls"},
+		"a result alone":          {ID: "find", Result: ResultDirListing, Params: []FieldSpec{{Key: "name", Type: FieldString, Required: true}}},
+		"list_dir":                listDir(path),
+		"list_dir, path required": listDir(FieldSpec{Key: "path", Type: FieldString, Required: true}),
+		"list_dir, more with defaults": listDir(FieldSpec{Key: "all", Type: FieldBool, Default: false}, path,
+			FieldSpec{Key: "depth", Type: FieldInt, Required: true, Default: 1}),
 	} {
 		if err := validateBuildCommand(c, nil); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -25,21 +26,26 @@ func TestCommandHandlers(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"bad id":            {BuildCommand{ID: "ls", Handler: "Dir-Listing"}, "handler must match"},
-		"no path":           {BuildCommand{ID: "ls", Handler: HandlerDirListing}, `takes a string param "path"`},
-		"path not a string": {BuildCommand{ID: "ls", Handler: HandlerDirListing, Params: []FieldSpec{{Key: "path", Type: FieldInt}}}, `takes a string param "path"`},
-		"more, optional without a default": {BuildCommand{ID: "ls", Handler: HandlerDirListing,
-			Params: []FieldSpec{path, {Key: "all", Type: FieldBool}}}, `param "all" needs a default`},
-		"more, required without a default": {BuildCommand{ID: "ls", Handler: HandlerDirListing,
-			Params: []FieldSpec{{Key: "depth", Type: FieldInt, Required: true}, path}}, `param "depth" needs a default`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (list_dir)`},
+		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
+		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
+		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
+		"more, required, no default": {listDir(FieldSpec{Key: "depth", Type: FieldInt, Required: true}, path),
+			`param "depth" needs a default`},
+		"action without its result": {BuildCommand{ID: "ls", Action: ActionListDir, Params: []FieldSpec{path}},
+			`action "list_dir" needs result "dir_listing"`},
 	} {
 		err := validateBuildCommand(tc.c, nil)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
 		}
 	}
-	if !KnownHandler(HandlerDirListing) || KnownHandler("process_list") {
-		t.Error("KnownHandler")
+	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
+		t.Error("KnownResult")
+	}
+	if a, ok := KnownAction(ActionListDir); !ok || a.Result != ResultDirListing || a.Params["path"] != FieldString {
+		t.Errorf("KnownAction: %+v %v", a, ok)
 	}
 }
 
