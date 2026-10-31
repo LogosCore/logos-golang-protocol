@@ -55,3 +55,59 @@ func TestReadFileDownload(t *testing.T) {
 		t.Errorf("download_file: %+v %v", a, ok)
 	}
 }
+
+// A command takes one file param at most; it has no default.
+func TestCommandFileParam(t *testing.T) {
+	file := FieldSpec{Key: "file", Type: FieldFile, Required: true, Accept: []string{".exe"}}
+	if err := validateBuildCommand(BuildCommand{ID: "put", Params: []FieldSpec{file}}, nil); err != nil {
+		t.Fatalf("a file param: %v", err)
+	}
+	two := BuildCommand{ID: "put", Params: []FieldSpec{file, {Key: "other", Type: FieldFile}}}
+	if err := validateBuildCommand(two, nil); err == nil || !strings.Contains(err.Error(), "one file param at most") {
+		t.Fatalf("two: %v", err)
+	}
+	if err := validateFieldSpec(file); err == nil {
+		t.Fatal("a file field outside build schemas")
+	}
+}
+
+func TestArgFile(t *testing.T) {
+	offer := FileOffer{Xfer: bytes.Repeat([]byte{1}, 16), Name: "tool.exe", Size: 5, SHA256: make([]byte, 32)}
+	// As a minion decodes a task: the args from CBOR, the offer a map.
+	raw, err := MarshalCBOR(map[string]any{"file": offer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args map[string]any
+	if err := cborDec.Unmarshal(raw, &args); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ArgFile(args, "file")
+	if err != nil || got.Name != "tool.exe" || got.Size != 5 || !bytes.Equal(got.Xfer, offer.Xfer) {
+		t.Fatalf("ArgFile: %+v %v", got, err)
+	}
+	for name, o := range map[string]FileOffer{
+		"short xfer": {Xfer: []byte{1}, Name: "a", SHA256: make([]byte, 32)},
+		"a path":     {Xfer: offer.Xfer, Name: "../a", SHA256: offer.SHA256},
+		"a \\ path":  {Xfer: offer.Xfer, Name: `c:\a`, SHA256: offer.SHA256},
+		"no sha256":  {Xfer: offer.Xfer, Name: "a"},
+	} {
+		if _, err := ArgFile(map[string]any{"file": o}, "file"); err == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+	if _, err := ArgFile(map[string]any{}, "file"); err == nil {
+		t.Error("none: taken")
+	}
+}
+
+func TestReadFileUpload(t *testing.T) {
+	data, _ := ResultData(FileUpload{Xfer: make([]byte, 16), Path: "/tmp/a", Size: 3, SHA256: make([]byte, 32)})
+	if f, err := ReadFileUpload(0, data); err != nil || f.Path != "/tmp/a" || f.Size != 3 {
+		t.Fatalf("%+v %v", f, err)
+	}
+	bad, _ := ResultData(FileUpload{Xfer: make([]byte, 16), SHA256: make([]byte, 32)})
+	if _, err := ReadFileUpload(0, bad); err == nil {
+		t.Fatal("no path: taken")
+	}
+}

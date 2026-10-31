@@ -26,8 +26,8 @@ func TestCommandResultsAndActions(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, file_download)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (download_file, list_dir)`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, file_download, file_upload)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (download_file, list_dir, upload_file)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -40,6 +40,16 @@ func TestCommandResultsAndActions(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
 		}
+	}
+	upload := BuildCommand{ID: "upload", Result: ResultFileUpload, Action: ActionUploadFile, Params: []FieldSpec{
+		{Key: "file", Type: FieldFile, Required: true}, {Key: "path", Type: FieldString, Required: true},
+		{Key: "overwrite", Type: FieldBool, Default: false}}}
+	if err := validateBuildCommand(upload, nil); err != nil {
+		t.Errorf("upload_file: %v", err)
+	}
+	upload.Params = upload.Params[1:]
+	if err := validateBuildCommand(upload, nil); err == nil || !strings.Contains(err.Error(), `takes a file param "file"`) {
+		t.Errorf("upload_file without its file: %v", err)
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")

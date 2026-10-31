@@ -263,9 +263,13 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 			s.Commands[0].Params = append(s.Commands[0].Params, s.Commands[0].Params[0])
 		}},
 		{`command "sleep": param "jitter": default`, func(s *BuildSchema) { s.Commands[0].Params[1].Default = 200 }},
-		// A task hands no files to a minion.
-		{`command "shell": param "command": type file is only for build schemas`, func(s *BuildSchema) {
+		// A task sends its minion one file at most, and a file has no default.
+		{`command "shell": param "command2": a command takes one file param at most`, func(s *BuildSchema) {
 			s.Commands[2].Params[0].Type = FieldFile
+			s.Commands[2].Params = append(s.Commands[2].Params, FieldSpec{Key: "command2", Type: FieldFile})
+		}},
+		{`command "shell": param "command": a file field has no default`, func(s *BuildSchema) {
+			s.Commands[2].Params[0].Type, s.Commands[2].Params[0].Default = FieldFile, "abc"
 		}},
 	}
 	for _, c := range cases {
