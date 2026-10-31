@@ -260,8 +260,11 @@ func TestTaskItems(t *testing.T) {
 func TestResultItems(t *testing.T) {
 	id := bytes.Repeat([]byte{9}, 16)
 	ok, exit := true, int64(1)
-	done := ResultItem{T: ItemResult, Task: id, Seq: 2, Done: true, OK: &ok, Out: []byte{0xff, 'a'}, Exit: &exit,
-		Data: map[string]any{"entries": []any{"a", "b"}}}
+	data, err := ResultData(map[string]any{"entries": []any{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := ResultItem{T: ItemResult, Task: id, Seq: 2, Done: true, OK: &ok, Out: []byte{0xff, 'a'}, Exit: &exit, Data: data}
 	raw, err := MarshalCBOR(done)
 	if err != nil {
 		t.Fatal(err)
@@ -272,6 +275,16 @@ func TestResultItems(t *testing.T) {
 	}
 	if !bytes.Equal(back.Out, done.Out) || *back.Exit != 1 || !*back.OK || back.Seq != 2 {
 		t.Fatalf("result %+v", back)
+	}
+	// The data comes through as it was sent.
+	if !bytes.Equal(back.Data, data) {
+		t.Fatalf("data %x, sent %x", back.Data, data)
+	}
+	if (ResultItem{T: ItemResult, Task: id, Data: []byte{0x82, 1, 2}}).Validate() == nil {
+		t.Fatal("data that is an array passed")
+	}
+	if _, err := ResultData([]int{1}); err == nil {
+		t.Fatal("ResultData took an array")
 	}
 	if (ResultItem{T: ItemResult, Task: id, Out: []byte("part")}).Validate() != nil {
 		t.Fatal("a part before the last is valid without ok")
@@ -314,7 +327,11 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 		entries[i] = map[string]any{"name": fmt.Sprintf("f%d", i)}
 	}
 	ok := true
-	raw, err := MarshalCBOR(ResultItem{T: ItemResult, Task: make([]byte, 16), Done: true, OK: &ok, Data: map[string]any{"entries": entries}})
+	data, err := ResultData(map[string]any{"entries": entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := MarshalCBOR(ResultItem{T: ItemResult, Task: make([]byte, 16), Done: true, OK: &ok, Data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,8 +341,12 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 		t.Fatalf("a message with a 1000-entry result: %v", err)
 	}
 	var r ResultItem
-	if err := UnmarshalCBOR(back.Items[0], &r); err != nil || len(r.Data["entries"].([]any)) != 1000 {
+	var got map[string]any
+	if err := UnmarshalCBOR(back.Items[0], &r); err != nil {
 		t.Fatalf("result: %v", err)
+	}
+	if err := UnmarshalCBOR(r.Data, &got); err != nil || len(got["entries"].([]any)) != 1000 {
+		t.Fatalf("result data: %v", err)
 	}
 	if ValidateMessageHead(MinionMessageV1, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
 		t.Fatal("more than 256 items passed")
