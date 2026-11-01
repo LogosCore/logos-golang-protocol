@@ -32,6 +32,10 @@ const (
 	// ResultFileStream is a file the minion streamed to whoever downloaded
 	// it (FileStream): core keeps none of it, the data says which file.
 	ResultFileStream = "file_stream"
+	// ResultDirWalk is a walk through a directory and what is under it
+	// (DirWalk): its listings go to core as they come (ResultItem.Ls), the
+	// data says where it stands.
+	ResultDirWalk = "dir_walk"
 )
 
 // Actions.
@@ -56,6 +60,10 @@ const (
 	// gives path and recursive (a folder with what is in it). It has no
 	// result: the task's output says what went.
 	ActionDeletePath = "delete_path"
+	// ActionWalkDir lists a directory and the folders under it, as deep as
+	// the command goes: core gives path; the command's result is a
+	// ResultDirWalk.
+	ActionWalkDir = "walk_dir"
 )
 
 // results are the results this version defines.
@@ -64,6 +72,7 @@ var results = map[string]bool{
 	ResultFileDownload: true,
 	ResultFileUpload:   true,
 	ResultFileStream:   true,
+	ResultDirWalk:      true,
 }
 
 // CommandAction is an action's contract: the params core gives when it runs a
@@ -85,6 +94,7 @@ var actions = map[string]CommandAction{
 	ActionUploadStream: {Params: map[string]FieldType{"path": FieldString, "stream": FieldStream, "overwrite": FieldBool},
 		Result: ResultFileUpload},
 	ActionDeletePath: {Params: map[string]FieldType{"path": FieldString, "recursive": FieldBool}},
+	ActionWalkDir:    {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 }
 
 // KnownResult reports whether this version defines the result.
@@ -289,4 +299,34 @@ func (p ListingPiece) Validate() error {
 		return fmt.Errorf("listing %d: %w", p.ID, err)
 	}
 	return nil
+}
+
+// DirWalk is a dir_walk part's data: where the walk stands. Each part says
+// it whole (the latest part's is the walk's): the directory it began at,
+// the folders listed and their entries, those it could not read, those it
+// did not enter (deeper than it goes, another file system, past its
+// limit), and the folder it is reading, none once it ended.
+type DirWalk struct {
+	// Root is the directory walked, absolute, as the host writes it.
+	Root    string `cbor:"root" json:"root"`
+	Folders uint64 `cbor:"folders" json:"folders"`
+	Entries uint64 `cbor:"entries" json:"entries"`
+	Unread  uint64 `cbor:"unread,omitempty" json:"unread,omitempty"`
+	Skipped uint64 `cbor:"skipped,omitempty" json:"skipped,omitempty"`
+	Current string `cbor:"current,omitempty" json:"current,omitempty"`
+	// X holds a factory's own fields.
+	X map[string]any `cbor:"x,omitempty" json:"x,omitempty"`
+}
+
+// ReadDirWalk decodes a dir_walk part's data and checks it: every part
+// names the directory walked.
+func ReadDirWalk(_ uint64, data cbor.RawMessage) (*DirWalk, error) {
+	var w DirWalk
+	if err := cborDec.Unmarshal(data, &w); err != nil {
+		return nil, fmt.Errorf("dir_walk: %w", err)
+	}
+	if w.Root == "" {
+		return nil, errors.New("dir_walk: root names the directory walked")
+	}
+	return &w, nil
 }

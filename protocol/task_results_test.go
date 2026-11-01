@@ -26,8 +26,8 @@ func TestCommandResultsAndActions(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, file_download, file_stream, file_upload)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, upload_file, upload_stream)`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -181,5 +181,23 @@ func TestResultItemListings(t *testing.T) {
 	r.Ls = append(r.Ls, ListingPiece{ID: 1, Part: 1, Path: "/x"})
 	if r.Validate() == nil {
 		t.Fatal("a bad piece passed")
+	}
+}
+
+func TestDirWalk(t *testing.T) {
+	data, err := ResultData(DirWalk{Root: "/home", Folders: 12, Entries: 340, Unread: 1, Current: "/home/u/docs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := ReadDirWalk(3, data)
+	if err != nil || w.Root != "/home" || w.Folders != 12 || w.Current != "/home/u/docs" {
+		t.Fatalf("%+v %v", w, err)
+	}
+	none, _ := ResultData(DirWalk{Folders: 1})
+	if _, err := ReadDirWalk(0, none); err == nil {
+		t.Fatal("a walk without its root passed")
+	}
+	if a, ok := KnownAction(ActionWalkDir); !ok || a.Result != ResultDirWalk || a.Params["path"] != FieldString || !KnownResult(ResultDirWalk) {
+		t.Fatalf("walk_dir: %+v", a)
 	}
 }
