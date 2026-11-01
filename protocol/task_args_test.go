@@ -22,7 +22,10 @@ func TestTaskArgs(t *testing.T) {
 		t.Fatalf("args %#v", args)
 	}
 	// Through CBOR and back, as the minion reads them.
-	raw, err := MarshalCBOR(TaskItem{T: ItemTask, Task: make([]byte, 16), Cmd: "shell", Args: args})
+	for i := range params {
+		params[i].Num = i + 1
+	}
+	raw, err := MarshalCBOR(TaskItem{T: ItemTask, Task: make([]byte, 16), Cmd: 11, Args: WireArgs(params, args)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,13 +33,13 @@ func TestTaskArgs(t *testing.T) {
 	if err := UnmarshalCBOR(raw, &task); err != nil {
 		t.Fatal(err)
 	}
-	if d, ok := ArgDuration(task.Args, "timeout"); !ok || d != 30*time.Second {
+	if d, ok := ArgDuration(task.Args, 2); !ok || d != 30*time.Second {
 		t.Fatalf("timeout %v %v", d, ok)
 	}
-	if s, ok := ArgString(task.Args, "command"); !ok || s != "whoami" {
+	if s, ok := ArgString(task.Args, 1); !ok || s != "whoami" {
 		t.Fatalf("command %q", s)
 	}
-	if n, ok := ArgInt(task.Args, "jitter"); !ok || n != 10 {
+	if n, ok := ArgInt(task.Args, 3); !ok || n != 10 {
 		t.Fatalf("jitter %d", n)
 	}
 

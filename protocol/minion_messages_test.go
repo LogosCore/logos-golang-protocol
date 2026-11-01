@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"slices"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -87,7 +89,7 @@ func TestStageMessages(t *testing.T) {
 	}
 	der, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	stage, _ := MarshalCBOR(StageItem{T: ItemStage, Key: der, Corr: NewMessageID()})
-	msg := MinionMessage{V: MinionMessageV2, ID: NewMessageID(), Items: []cbor.RawMessage{stage}}
+	msg := MinionMessage{V: MinionMessageV3, ID: NewMessageID(), Items: []cbor.RawMessage{stage}}
 	data, err := MarshalCBOR(msg)
 	if err != nil {
 		t.Fatal(err)
@@ -131,8 +133,9 @@ func TestStageMessages(t *testing.T) {
 }
 
 func TestHello(t *testing.T) {
-	in := HelloItem{T: ItemHello, PID: 4242, OS: "linux", Arch: "amd64", Host: "web01", Integrity: "root",
-		Addrs: []string{"10.0.0.5"}, X: map[string]any{"cfg": map[string]any{"jitter": uint64(3)}}}
+	in := HelloItem{T: ItemHello, PID: 4242, OS: "linux", Arch: "amd64", Host: "web01", Integrity: IntegrityRoot,
+		Addrs: []net.IP{net.ParseIP("10.0.0.5").To4(), net.ParseIP("fe80::1")}, MachineSource: MachineLinuxMachineID,
+		MachineValue: "ABCDEF0123", X: map[string]any{"cfg": map[string]any{"jitter": uint64(3)}}}
 	data, err := MarshalCBOR(in)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +144,8 @@ func TestHello(t *testing.T) {
 	if err := UnmarshalCBOR(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if err := got.Validate(); err != nil || got.PID != 4242 || got.Host != "web01" {
+	if err := got.Validate(); err != nil || got.PID != 4242 || got.Host != "web01" || IntegrityName(got.Integrity) != "root" ||
+		!slices.Equal(got.AddrStrings(), []string{"10.0.0.5", "fe80::1"}) || got.MachineID() != "linux-machine-id:abcdef0123" {
 		t.Fatalf("hello %+v: %v", got, err)
 	}
 	if _, ok := got.X["cfg"].(map[string]any); !ok {
@@ -151,7 +155,10 @@ func TestHello(t *testing.T) {
 		{OS: "linux", Arch: "amd64"},
 		{PID: 1, Arch: "amd64"},
 		{PID: 1, OS: "linux"},
-		{PID: 1, OS: "linux", Arch: "amd64", Integrity: "admin"},
+		{PID: 1, OS: "linux", Arch: "amd64", Integrity: -1},
+		{PID: 1, OS: "linux", Arch: "amd64", Addrs: []net.IP{{1, 2, 3}}},
+		{PID: 1, OS: "linux", Arch: "amd64", MachineValue: "x"},
+		{PID: 1, OS: "linux", Arch: "amd64", MachineSource: MachineKept},
 		{PID: 1, OS: "linux", Arch: "amd64", SID: []byte{1, 2, 3}},
 		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 0}},
 		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 1000, Jitter: 101}},
@@ -220,23 +227,23 @@ func TestCBORRules(t *testing.T) {
 		v      int
 		id, re []byte
 	}{
-		"no id or re": {2, nil, nil},
-		"both":        {2, id, id},
-		"short id":    {2, id[:8], nil},
-		"v1":          {1, id, nil},
+		"no id or re": {3, nil, nil},
+		"both":        {3, id, id},
+		"short id":    {3, id[:8], nil},
+		"v2":          {2, id, nil},
 	} {
 		if err := ValidateMessageHead(c.v, c.id, c.re, 0); err == nil {
 			t.Errorf("%s: valid", name)
 		}
 	}
-	if err := ValidateMessageHead(2, nil, id, 1); err != nil {
+	if err := ValidateMessageHead(3, nil, id, 1); err != nil {
 		t.Errorf("a reply: %v", err)
 	}
 }
 
 func TestTaskItems(t *testing.T) {
 	id := bytes.Repeat([]byte{7}, 16)
-	task := TaskItem{T: ItemTask, Task: id, Cmd: "shell", Args: map[string]any{"command": "whoami", "timeout": uint64(30000)}}
+	task := TaskItem{T: ItemTask, Task: id, Cmd: 11, Args: Args{1: "whoami", 2: uint64(30000)}}
 	raw, err := MarshalCBOR(task)
 	if err != nil {
 		t.Fatal(err)
@@ -245,12 +252,12 @@ func TestTaskItems(t *testing.T) {
 	if err := UnmarshalCBOR(raw, &back); err != nil || back.Validate() != nil || ItemType(raw) != ItemTask {
 		t.Fatalf("task round trip: %+v, %v", back, err)
 	}
-	if back.Args["command"] != "whoami" {
+	if s, _ := ArgString(back.Args, 1); s != "whoami" || back.Cmd != 11 {
 		t.Fatalf("args %v", back.Args)
 	}
 	for name, bad := range map[string]TaskItem{
-		"short id": {T: ItemTask, Task: id[:8], Cmd: "ls"},
-		"bad cmd":  {T: ItemTask, Task: id, Cmd: "Shell!"},
+		"short id": {T: ItemTask, Task: id[:8], Cmd: 4},
+		"no cmd":   {T: ItemTask, Task: id},
 	} {
 		if bad.Validate() == nil {
 			t.Errorf("%s: valid", name)
@@ -339,7 +346,7 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, _ := MarshalCBOR(MinionMessage{V: MinionMessageV2, ID: make([]byte, 16), Items: []cbor.RawMessage{raw}})
+	msg, _ := MarshalCBOR(MinionMessage{V: MinionMessageV3, ID: make([]byte, 16), Items: []cbor.RawMessage{raw}})
 	var back MinionMessage
 	if err := UnmarshalCBOR(msg, &back); err != nil {
 		t.Fatalf("a message with a 1000-entry result: %v", err)
@@ -352,7 +359,7 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 	if err := UnmarshalCBOR(r.Data, &got); err != nil || len(got["entries"].([]any)) != 1000 {
 		t.Fatalf("result data: %v", err)
 	}
-	if ValidateMessageHead(MinionMessageV2, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
+	if ValidateMessageHead(MinionMessageV3, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
 		t.Fatal("more than 256 items passed")
 	}
 }

@@ -165,7 +165,7 @@ func TestListingPiece(t *testing.T) {
 
 func TestResultItemListings(t *testing.T) {
 	task := make([]byte, 16)
-	r := ResultItem{T: ItemResult, Task: task, Seq: 0, Ls: []ListingPiece{{ID: 0, Part: 0, Last: true, Path: "/", Sep: "/"}}}
+	r := ResultItem{T: ItemResult, Task: task, Seq: 0, Ls: []LsPiece{{ID: 0, Part: 0, Last: true, Path: "/", Sep: "/"}}}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestResultItemListings(t *testing.T) {
 	if err := cborDec.Unmarshal(b, &back); err != nil || len(back.Ls) != 1 || back.Ls[0].Path != "/" || !back.Ls[0].Last {
 		t.Fatalf("round trip: %+v %v", back, err)
 	}
-	r.Ls = append(r.Ls, ListingPiece{ID: 1, Part: 1, Path: "/x"})
+	r.Ls = append(r.Ls, LsPiece{ID: 1, Part: 1, Path: "/x"})
 	if r.Validate() == nil {
 		t.Fatal("a bad piece passed")
 	}

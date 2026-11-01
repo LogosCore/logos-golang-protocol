@@ -10,7 +10,7 @@ import (
 // docBuildSchema is the example of the Minion Build contract page
 // (logos-docs, contracts/minion-build), verbatim.
 const docBuildSchema = `{
-  "schema_version": "1",
+  "schema_version": "2",
   "version": 1,
   "channels": [
     {
@@ -68,23 +68,23 @@ const docBuildSchema = `{
   ],
   "commands": [
     {
-      "id": "sleep", "label": "Sleep", "required": true,
+      "id": "sleep", "op": 1, "label": "Sleep", "required": true,
       "description": "Changes how long the minion waits between check-ins.",
       "params": [
-        { "key": "interval", "type": "duration", "label": "Interval", "required": true },
-        { "key": "jitter", "type": "int", "label": "Jitter", "unit": "%", "min": 0, "max": 100, "default": 0 }
+        { "key": "interval", "num": 1, "type": "duration", "label": "Interval", "required": true },
+        { "key": "jitter", "num": 2, "type": "int", "label": "Jitter", "unit": "%", "min": 0, "max": 100, "default": 0 }
       ]
     },
-    { "id": "exit", "label": "Exit", "required": true },
+    { "id": "exit", "op": 2, "label": "Exit", "required": true },
     {
-      "id": "shell", "label": "Run a command", "default": true,
-      "params": [{ "key": "command", "type": "string", "label": "Command", "required": true }]
+      "id": "shell", "op": 3, "label": "Run a command", "default": true,
+      "params": [{ "key": "command", "num": 1, "type": "string", "label": "Command", "required": true }]
     },
     {
-      "id": "download", "label": "Download a file", "default": true,
-      "params": [{ "key": "path", "type": "string", "label": "Path", "required": true }]
+      "id": "download", "op": 4, "label": "Download a file", "default": true,
+      "params": [{ "key": "path", "num": 1, "type": "string", "label": "Path", "required": true }]
     },
-    { "id": "screenshot", "label": "Screenshot", "targets": ["windows-exe"] }
+    { "id": "screenshot", "op": 5, "label": "Screenshot", "targets": ["windows-exe"] }
   ]
 }`
 
@@ -210,7 +210,12 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		want   string
 		mutate func(s *BuildSchema)
 	}{
-		{`unsupported build schema_version "2"`, func(s *BuildSchema) { s.SchemaVersion = "2" }},
+		{`unsupported build schema_version "1"`, func(s *BuildSchema) { s.SchemaVersion = "1" }},
+		{`command "exit": op must be 1 to 65535`, func(s *BuildSchema) { s.Commands[1].Op = 0 }},
+		{`command "exit": op 1 is "sleep"'s`, func(s *BuildSchema) { s.Commands[1].Op = 1 }},
+		{`command "sleep": param "jitter": num must be 1 to 65535`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 0 }},
+		{`command "sleep": param "jitter": num 1 is "interval"'s`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 1 }},
+		{`field "debug": only a command's params have a num`, func(s *BuildSchema) { s.Fields[2].Num = 1 }},
 		{"version must be at least 1", func(s *BuildSchema) { s.Version = 0 }},
 		{"at least one channel", func(s *BuildSchema) { s.Channels = nil }},
 		{`duplicate channel "dns"`, func(s *BuildSchema) { s.Channels = append(s.Channels, s.Channels[1]) }},

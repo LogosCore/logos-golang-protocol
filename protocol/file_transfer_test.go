@@ -76,7 +76,7 @@ func TestCommandFileParam(t *testing.T) {
 func TestArgFile(t *testing.T) {
 	offer := FileOffer{Xfer: bytes.Repeat([]byte{1}, 16), Name: "tool.exe", Size: 5, SHA256: make([]byte, 32)}
 	// As a minion decodes a task: the args from CBOR, the offer a map.
-	raw, err := MarshalCBOR(map[string]any{"file": offer})
+	raw, err := MarshalCBOR(Args{2: offer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,10 +84,10 @@ func TestArgFile(t *testing.T) {
 	if err := cborDec.Unmarshal(raw, &args); err != nil {
 		t.Fatal(err)
 	}
-	if _, raw := args["file"].(cbor.RawMessage); !raw {
-		t.Fatalf("the offer decoded as %T, not kept raw", args["file"])
+	if _, raw := args[2].(cbor.RawMessage); !raw {
+		t.Fatalf("the offer decoded as %T, not kept raw", args[2])
 	}
-	got, err := ArgFile(args, "file")
+	got, err := ArgFile(args, 2)
 	if err != nil || got.Name != "tool.exe" || got.Size != 5 || !bytes.Equal(got.Xfer, offer.Xfer) {
 		t.Fatalf("ArgFile: %+v %v", got, err)
 	}

@@ -29,7 +29,7 @@ func TestMachineID(t *testing.T) {
 	if (HelloItem{PID: 1, OS: "linux", Arch: "amd64"}).Validate() != nil {
 		t.Error("a hello without machine_id")
 	}
-	if (HelloItem{PID: 1, OS: "linux", Arch: "amd64", MachineID: "bad"}).Validate() == nil {
+	if (HelloItem{PID: 1, OS: "linux", Arch: "amd64", MachineSource: MachineHostname, MachineValue: "bad value"}).Validate() == nil {
 		t.Error("a bad machine_id passed")
 	}
 }
