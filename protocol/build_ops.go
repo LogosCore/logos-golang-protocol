@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -75,6 +76,17 @@ type ExportChannel struct {
 type BuildConnection struct {
 	Endpoint ChannelEndpointExport `json:"endpoint"`
 	Values   map[string]any        `json:"values,omitempty"`
+	// Kind is the connection's kind (KindReverseCall, ...): empty is
+	// reverse-call, as every connection was before kinds.
+	Kind string `json:"kind,omitempty"`
+}
+
+// ConnectionKind is the connection's kind, reverse-call when it says none.
+func (c BuildConnection) ConnectionKind() string {
+	if c.Kind == "" {
+		return KindReverseCall
+	}
+	return c.Kind
 }
 
 // BuildCrypto is the payload crypto a minion is built with. The payload
@@ -349,6 +361,11 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 			}
 			if !s.Supports(t, e.Channel.ModuleName, e.Channel.SchemaVersion) {
 				add(key, "target %q cannot connect through channel %q version %d", t.ID, e.Channel.ModuleName, e.Channel.SchemaVersion)
+				continue
+			}
+			if kinds := s.TargetKinds(t, e.Channel.ModuleName); !slices.Contains(kinds, c.ConnectionKind()) {
+				add(key+".kind", "target %q does not connect through channel %q as %s (%s)", t.ID, e.Channel.ModuleName,
+					c.ConnectionKind(), strings.Join(kinds, ", "))
 				continue
 			}
 			ch, _ := s.Channel(e.Channel.ModuleName)

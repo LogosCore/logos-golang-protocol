@@ -195,9 +195,10 @@ func TestGetTasks(t *testing.T) {
 	if err := UnmarshalCBOR(data, &got); err != nil || got.Max != nil {
 		t.Fatalf("no max: %+v %v", got, err)
 	}
+	// max 0 is a pause: taken.
 	zero := uint64(0)
-	if (GetTasksItem{T: ItemGetTasks, Max: &zero}).Validate() == nil {
-		t.Fatal("max 0 passed")
+	if (GetTasksItem{T: ItemGetTasks, Max: &zero}).Validate() != nil {
+		t.Fatal("max 0 refused")
 	}
 }
 

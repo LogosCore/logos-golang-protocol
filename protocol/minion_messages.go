@@ -265,19 +265,17 @@ type HelloResponseItem struct {
 }
 
 // GetTasksItem says the minion takes new tasks, and how many at most: nil
-// for no limit of the minion's. A message without one takes none.
+// for no limit of the minion's. A message without one takes none. Through a
+// call, Max bounds the tasks in that reply; on a persistent connection it is
+// a standing allowance, the tasks core keeps unfinished, until the next
+// get_tasks. Max 0 takes none for now: a minion pauses with it.
 type GetTasksItem struct {
 	T   int     `cbor:"0,keyasint"`
 	Max *uint64 `cbor:"1,keyasint,omitempty"`
 }
 
-// Validate refuses a max of 0.
-func (g GetTasksItem) Validate() error {
-	if g.Max != nil && *g.Max == 0 {
-		return errors.New("get_tasks: max is at least 1")
-	}
-	return nil
-}
+// Validate takes any max: 0 is a pause.
+func (g GetTasksItem) Validate() error { return nil }
 
 // TaskItem is a command for the minion to run (core → minion): Task is its
 // id (16 random bytes), Cmd the number the build schema gives the command

@@ -1,7 +1,10 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 )
 
@@ -15,8 +18,14 @@ import (
 // channel's own settings are its management properties. Values are validated
 // with the same FieldSpec rules as properties.
 
-// ConnectionSchemaV1 is the current connection schema format version.
+// ConnectionSchemaV1 is the connection schema format without kinds: its
+// channel carries reverse-call connections only.
 const ConnectionSchemaV1 = "1"
+
+// ConnectionSchemaV2 is the format with kinds: the connection kinds the
+// channel carries, each with fields of its own (docs:
+// contracts/channel-core-connections/, The connection schema by kind).
+const ConnectionSchemaV2 = "2"
 
 // RegisterFieldConnection is the module.register key a channel declares its
 // connection schema under.
@@ -36,6 +45,46 @@ type ConnectionSchema struct {
 	// meaning). Adding an optional field does not need a new version.
 	Version int         `json:"version"`
 	Fields  []FieldSpec `json:"fields"`
+	// Kinds are the connection kinds the channel carries (ConnectionSchemaV2
+	// only), by kind (KindReverseCall, ...).
+	Kinds map[string]ConnectionKind `json:"kinds,omitempty"`
+}
+
+// ConnectionKind is what one connection kind adds to the shared fields:
+// Fields built into a minion, and, for a bind kind, Target, what operators
+// fill in for each target.
+type ConnectionKind struct {
+	Fields []FieldSpec `json:"fields,omitempty"`
+	Target []FieldSpec `json:"target,omitempty"`
+}
+
+// knownKinds are the connection kinds, in the order kinds are listed.
+var knownKinds = []string{KindReverseCall, KindReversePersistent, KindBindCall, KindBindPersistent}
+
+// KnownKind reports whether kind is a connection kind.
+func KnownKind(kind string) bool { return slices.Contains(knownKinds, kind) }
+
+// SupportedKinds are the kinds the channel carries: reverse-call alone for
+// a schema without kinds.
+func (s ConnectionSchema) SupportedKinds() []string {
+	if len(s.Kinds) == 0 {
+		return []string{KindReverseCall}
+	}
+	var out []string
+	for _, k := range knownKinds {
+		if _, ok := s.Kinds[k]; ok {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// KindFields are the fields a connection of kind is built with: the shared
+// ones, then the kind's own.
+func (s ConnectionSchema) KindFields(kind string) []FieldSpec {
+	k := s.Kinds[kind]
+	out := make([]FieldSpec, 0, len(s.Fields)+len(k.Fields))
+	return append(append(out, s.Fields...), k.Fields...)
 }
 
 // Field returns the field with key, if declared.
@@ -51,7 +100,16 @@ func (s ConnectionSchema) Field(key string) (FieldSpec, bool) {
 // ValidateConnectionSchema checks a schema's structure, limits, and that every
 // declared default satisfies its own field spec.
 func ValidateConnectionSchema(s ConnectionSchema) error {
-	if s.SchemaVersion != ConnectionSchemaV1 {
+	switch s.SchemaVersion {
+	case ConnectionSchemaV1:
+		if len(s.Kinds) > 0 {
+			return fmt.Errorf("kinds need connection schema_version %q", ConnectionSchemaV2)
+		}
+	case ConnectionSchemaV2:
+		if err := validateConnectionKinds(s); err != nil {
+			return err
+		}
+	default:
 		return fmt.Errorf("unsupported connection schema_version %q", s.SchemaVersion)
 	}
 	if s.Version < 1 {
@@ -82,6 +140,39 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 // under its own name.
 func ValidateConnectionValues(s ConnectionSchema, values map[string]any) map[string]string {
 	return validateValues(s.Fields, values, "not a field of this channel's connection schema")
+}
+
+// validateConnectionKinds checks a schema's kinds: at least one, each a
+// known kind; their fields and targets as any field, a kind's keys unique
+// across the shared fields, its own and its target's; targets for bind
+// kinds only.
+func validateConnectionKinds(s ConnectionSchema) error {
+	if len(s.Kinds) == 0 {
+		return errors.New("kinds: at least one")
+	}
+	for _, kind := range slices.Sorted(maps.Keys(s.Kinds)) {
+		if !KnownKind(kind) {
+			return fmt.Errorf("kinds: %q is not a connection kind", kind)
+		}
+		k := s.Kinds[kind]
+		if len(k.Target) > 0 && kind != KindBindCall && kind != KindBindPersistent {
+			return fmt.Errorf("kinds.%s: only a bind kind has target fields", kind)
+		}
+		keys := map[string]bool{}
+		for _, f := range s.Fields {
+			keys[f.Key] = true
+		}
+		for _, f := range append(slices.Clone(k.Fields), k.Target...) {
+			if err := validateFieldSpec(f); err != nil {
+				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
+			}
+			if keys[f.Key] {
+				return fmt.Errorf("kinds.%s: duplicate field key %q", kind, f.Key)
+			}
+			keys[f.Key] = true
+		}
+	}
+	return nil
 }
 
 // ResolveConnectionValues is what a minion is given: values over the schema's

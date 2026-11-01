@@ -91,6 +91,19 @@ type BuildSchema struct {
 type ChannelVersions struct {
 	ModuleName string `json:"module_name"`
 	Versions   []int  `json:"versions"`
+	// Kinds are the connection kinds (KindReverseCall, ...) the minions
+	// support through the channel, in the factory's order of preference:
+	// a build that names none takes the first one the channel carries too.
+	// Empty is reverse-call alone. A target's entry narrows the factory's.
+	Kinds []string `json:"kinds,omitempty"`
+}
+
+// KindList is the kinds the entry lists, reverse-call when it lists none.
+func (c ChannelVersions) KindList() []string {
+	if len(c.Kinds) == 0 {
+		return []string{KindReverseCall}
+	}
+	return c.Kinds
 }
 
 // BuildChannel is a channel kind the minions speak. Fields are the factory's
@@ -197,6 +210,37 @@ func (s BuildSchema) TargetChannels(t BuildTarget) []ChannelVersions {
 	out := make([]ChannelVersions, len(s.Channels))
 	for i, c := range s.Channels {
 		out[i] = c.ChannelVersions
+	}
+	return out
+}
+
+// TargetKinds are the connection kinds a build of t supports through channel
+// moduleName, in the factory's order: the target's entry's when it lists
+// any, else the factory's. None when t cannot connect through it.
+func (s BuildSchema) TargetKinds(t BuildTarget, moduleName string) []string {
+	for _, c := range t.Channels {
+		if c.ModuleName == moduleName && len(c.Kinds) > 0 {
+			return c.Kinds
+		}
+	}
+	for _, c := range s.TargetChannels(t) {
+		if c.ModuleName == moduleName {
+			if ch, ok := s.Channel(moduleName); ok {
+				return ch.KindList()
+			}
+		}
+	}
+	return nil
+}
+
+// UsableKinds are the kinds both sides support: those of factory (in its
+// order) the channel carries too.
+func UsableKinds(factory, channel []string) []string {
+	var out []string
+	for _, k := range factory {
+		if slices.Contains(channel, k) {
+			out = append(out, k)
+		}
 	}
 	return out
 }
@@ -424,6 +468,14 @@ func validateChannelVersions(c ChannelVersions) error {
 			return fmt.Errorf("duplicate version %d", v)
 		}
 	}
+	for i, k := range c.Kinds {
+		if !KnownKind(k) {
+			return fmt.Errorf("kinds: %q is not a connection kind", k)
+		}
+		if slices.Contains(c.Kinds[:i], k) {
+			return fmt.Errorf("duplicate kind %q", k)
+		}
+	}
 	return nil
 }
 
@@ -484,6 +536,11 @@ func validateBuildTarget(t BuildTarget, shared map[string]bool, channels map[str
 		for _, v := range c.Versions {
 			if !slices.Contains(declared.Versions, v) {
 				return fmt.Errorf("channel %q: version %d is not one the factory lists", c.ModuleName, v)
+			}
+		}
+		for _, k := range c.Kinds {
+			if !slices.Contains(declared.KindList(), k) {
+				return fmt.Errorf("channel %q: kind %q is not one the factory lists", c.ModuleName, k)
 			}
 		}
 		for _, prev := range t.Channels[:i] {
