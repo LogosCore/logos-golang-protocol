@@ -227,8 +227,11 @@ func TestFieldFormat(t *testing.T) {
 	if err := validateFieldSpec(FieldSpec{Key: "ua", Type: FieldString, Format: FormatUserAgent}); err != nil {
 		t.Errorf("user_agent format: %v", err)
 	}
+	if err := validateFieldSpec(FieldSpec{Key: "conn", Type: FieldInt, Format: FormatConnection}); err != nil {
+		t.Errorf("connection format on an int: %v", err)
+	}
 	for name, f := range map[string]FieldSpec{
-		"on an int":  {Key: "n", Type: FieldInt, Format: FormatUserAgent},
+		"on a bool":  {Key: "b", Type: FieldBool, Format: FormatUserAgent},
 		"bad format": {Key: "s", Type: FieldString, Format: "User Agent"},
 	} {
 		if err := validateFieldSpec(f); err == nil {
