@@ -87,7 +87,7 @@ func TestStageMessages(t *testing.T) {
 	}
 	der, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	stage, _ := MarshalCBOR(StageItem{T: ItemStage, Key: der, Corr: NewMessageID()})
-	msg := MinionMessage{V: MinionMessageV1, ID: NewMessageID(), Items: []cbor.RawMessage{stage}}
+	msg := MinionMessage{V: MinionMessageV2, ID: NewMessageID(), Items: []cbor.RawMessage{stage}}
 	data, err := MarshalCBOR(msg)
 	if err != nil {
 		t.Fatal(err)
@@ -199,33 +199,37 @@ func TestGetTasks(t *testing.T) {
 func TestCBORRules(t *testing.T) {
 	var m MinionMessage
 	for name, h := range map[string]string{
-		"duplicate key":      "a2617601617601",                         // {"v": 1, "v": 1}
-		"indefinite map":     "bf617601ff",                             // {_ "v": 1}
-		"tag":                "a16176c11a6553f100",                     // {"v": 1(1700000000)}
-		"invalid UTF-8 text": "a1617663ff00ff",                         // {"v": "\xff\x00\xff"}
-		"huge claim":         "a161695bffffffffffffffff",               // {"i": bytes(2^64-1)}
-		"too deep":           "a1617681818181818181818181818181818100", // {"v": 17 nested arrays}
+		"duplicate key":  "a200020002",                             // {0: 2, 0: 2}
+		"indefinite map": "bf0002ff",                               // {_ 0: 2}
+		"tag":            "a100c11a6553f100",                       // {0: 1(1700000000)}
+		"huge claim":     "a1015bffffffffffffffff",                 // {1: bytes(2^64-1)}
+		"too deep":       "a1038181818181818181818181818181818100", // {3: 17 nested arrays}
 	} {
 		data, _ := hex.DecodeString(h)
 		if err := UnmarshalCBOR(data, &m); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	// Text inside an item is checked where the item decodes.
+	bad, _ := hex.DecodeString("a200030263ff00ff") // {0: hello, 2: "\xff\x00\xff"}
+	if err := UnmarshalCBOR(bad, &HelloItem{}); err == nil {
+		t.Error("invalid UTF-8 text: accepted")
+	}
 	id := NewMessageID()
 	for name, c := range map[string]struct {
 		v      int
 		id, re []byte
 	}{
-		"no id or re": {1, nil, nil},
-		"both":        {1, id, id},
-		"short id":    {1, id[:8], nil},
-		"v2":          {2, id, nil},
+		"no id or re": {2, nil, nil},
+		"both":        {2, id, id},
+		"short id":    {2, id[:8], nil},
+		"v1":          {1, id, nil},
 	} {
 		if err := ValidateMessageHead(c.v, c.id, c.re, 0); err == nil {
 			t.Errorf("%s: valid", name)
 		}
 	}
-	if err := ValidateMessageHead(1, nil, id, 1); err != nil {
+	if err := ValidateMessageHead(2, nil, id, 1); err != nil {
 		t.Errorf("a reply: %v", err)
 	}
 }
@@ -335,7 +339,7 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, _ := MarshalCBOR(MinionMessage{V: MinionMessageV1, ID: make([]byte, 16), Items: []cbor.RawMessage{raw}})
+	msg, _ := MarshalCBOR(MinionMessage{V: MinionMessageV2, ID: make([]byte, 16), Items: []cbor.RawMessage{raw}})
 	var back MinionMessage
 	if err := UnmarshalCBOR(msg, &back); err != nil {
 		t.Fatalf("a message with a 1000-entry result: %v", err)
@@ -348,7 +352,7 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 	if err := UnmarshalCBOR(r.Data, &got); err != nil || len(got["entries"].([]any)) != 1000 {
 		t.Fatalf("result data: %v", err)
 	}
-	if ValidateMessageHead(MinionMessageV1, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
+	if ValidateMessageHead(MinionMessageV2, make([]byte, 16), nil, MaxMinionMessageItems+1) == nil {
 		t.Fatal("more than 256 items passed")
 	}
 }

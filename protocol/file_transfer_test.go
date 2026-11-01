@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 func TestChunkItem(t *testing.T) {
@@ -78,9 +80,12 @@ func TestArgFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var args map[string]any
+	var args Args
 	if err := cborDec.Unmarshal(raw, &args); err != nil {
 		t.Fatal(err)
+	}
+	if _, raw := args["file"].(cbor.RawMessage); !raw {
+		t.Fatalf("the offer decoded as %T, not kept raw", args["file"])
 	}
 	got, err := ArgFile(args, "file")
 	if err != nil || got.Name != "tool.exe" || got.Size != 5 || !bytes.Equal(got.Xfer, offer.Xfer) {
