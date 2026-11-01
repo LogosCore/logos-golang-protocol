@@ -10,24 +10,38 @@ import (
 // docBuildSchema is the example of the Minion Build contract page
 // (logos-docs, contracts/minion-build), verbatim.
 const docBuildSchema = `{
-  "schema_version": "2",
+  "schema_version": "3",
   "version": 1,
   "channels": [
     {
       "module_name": "http", "versions": [2],
-      "fields": [
+      "kinds": [
         {
-          "key": "method", "type": "enum", "label": "Method", "default": "POST",
-          "options": [{ "value": "GET" }, { "value": "POST" }, { "value": "PUT" }]
+          "kind": "reverse-call",
+          "fields": [
+            {
+              "key": "method", "type": "enum", "label": "Method", "default": "POST",
+              "options": [{ "value": "GET" }, { "value": "POST" }, { "value": "PUT" }]
+            },
+            {
+              "key": "path_prefix", "type": "string", "label": "Path prefix", "default": "/",
+              "description": "Every request path starts with it, e.g. /cdn/assets/ when the front forwards only that path.",
+              "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
+            }
+          ]
         },
         {
-          "key": "path_prefix", "type": "string", "label": "Path prefix", "default": "/",
-          "description": "Every request path starts with it, e.g. /cdn/assets/ when the front forwards only that path.",
-          "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
+          "kind": "reverse-persistent",
+          "fields": [
+            {
+              "key": "path_prefix", "type": "string", "label": "Path prefix", "default": "/",
+              "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
+            }
+          ]
         }
       ]
     },
-    { "module_name": "dns", "versions": [1] }
+    { "module_name": "dns", "versions": [1], "kinds": [{ "kind": "reverse-call" }] }
   ],
   "crypto": "aes-256-cbc-hmac-sha256",
   "fields": [
@@ -112,8 +126,9 @@ func TestBuildSchemaDocExample(t *testing.T) {
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatal(err)
 	}
-	if http, ok := s.Channel("http"); !ok || len(http.Fields) != 2 || !reflect.DeepEqual(http.Versions, []int{2}) {
-		t.Fatalf("http channel not decoded (embedded ChannelVersions): %+v", http)
+	if http, ok := s.Channel("http"); !ok || len(http.KindFields(KindReverseCall)) != 2 || len(http.KindFields(KindReversePersistent)) != 1 ||
+		!reflect.DeepEqual(http.Versions, []int{2}) {
+		t.Fatalf("http channel not decoded: %+v", http)
 	}
 
 	raw, err := json.Marshal(s)
@@ -210,7 +225,7 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		want   string
 		mutate func(s *BuildSchema)
 	}{
-		{`unsupported build schema_version "1"`, func(s *BuildSchema) { s.SchemaVersion = "1" }},
+		{`unsupported build schema_version "2"`, func(s *BuildSchema) { s.SchemaVersion = "2" }},
 		{`command "exit": op must be 1 to 65535`, func(s *BuildSchema) { s.Commands[1].Op = 0 }},
 		{`command "exit": op 1 is "sleep"'s`, func(s *BuildSchema) { s.Commands[1].Op = 1 }},
 		{`command "sleep": param "jitter": num must be 1 to 65535`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 0 }},
@@ -223,10 +238,13 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{"versions start at 1", func(s *BuildSchema) { s.Channels[1].Versions = []int{0} }},
 		{"duplicate version 1", func(s *BuildSchema) { s.Channels[1].Versions = []int{1, 1} }},
 		{"module_name must be", func(s *BuildSchema) { s.Channels[1].ModuleName = "my dns" }},
-		{`channel "http": field "method": default`, func(s *BuildSchema) { s.Channels[0].Fields[0].Default = "PATCH" }},
-		{`channel "http": duplicate field key "method"`, func(s *BuildSchema) {
-			s.Channels[0].Fields = append(s.Channels[0].Fields, s.Channels[0].Fields[0])
+		{`channel "http" kind reverse-call: field "method": default`, func(s *BuildSchema) { s.Channels[0].Kinds[0].Fields[0].Default = "PATCH" }},
+		{`channel "http" kind reverse-call: duplicate field key "method"`, func(s *BuildSchema) {
+			s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, s.Channels[0].Kinds[0].Fields[0])
 		}},
+		{`channel "dns": at least one connection kind`, func(s *BuildSchema) { s.Channels[1].Kinds = nil }},
+		{`kinds: "sideways" is not a connection kind`, func(s *BuildSchema) { s.Channels[1].Kinds[0].Kind = "sideways" }},
+		{`duplicate kind "reverse-call"`, func(s *BuildSchema) { s.Channels[0].Kinds[1].Kind = KindReverseCall }},
 		{`crypto suite "X25519!"`, func(s *BuildSchema) { s.Crypto = "X25519!" }},
 		{`field "kill_date": invalid type "blob"`, func(s *BuildSchema) { s.Fields[0].Type = "blob" }},
 		{"at least one target", func(s *BuildSchema) { s.Targets = nil }},
@@ -377,8 +395,8 @@ func TestFieldFile(t *testing.T) {
 		Status: []StatusSpec{{Key: "icon", Type: FieldFile}}}); err == nil {
 		t.Error("file status value accepted")
 	}
-	if err := ValidateConnectionSchema(ConnectionSchema{SchemaVersion: ConnectionSchemaV1, Version: 1,
-		Fields: []FieldSpec{f}}); err == nil {
+	if err := ValidateConnectionSchema(ConnectionSchema{SchemaVersion: ConnectionSchemaV2, Version: 1,
+		Kinds: map[string]ConnectionKind{KindReverseCall: {Fields: []FieldSpec{f}}}}); err == nil {
 		t.Error("file connection field accepted")
 	}
 

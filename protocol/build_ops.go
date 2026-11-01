@@ -32,8 +32,10 @@ const (
 // many builds as it can; core tries another instance.
 const CodeBusy = "busy"
 
-// ChannelEndpointExportV1 is the format of a channel endpoint export.
-const ChannelEndpointExportV1 = "logos.channel-endpoint.v1"
+// ChannelEndpointExportV2 is the format of a channel endpoint export: a
+// connection kind's settings. "logos.channel-endpoint.v1" is no longer
+// taken.
+const ChannelEndpointExportV2 = "logos.channel-endpoint.v2"
 
 // Build operation limits.
 const (
@@ -56,13 +58,17 @@ var (
 )
 
 // ChannelEndpointExport is a channel endpoint as a minion's connection
-// settings (ChannelEndpointExportV1): the channel kind, the connection schema
-// version the values follow, and the values over that schema's defaults.
+// settings (ChannelEndpointExportV2): the channel, the connection kind, the
+// connection schema version the values follow, and the values over that
+// kind's defaults.
 type ChannelEndpointExport struct {
-	Format  string         `json:"format"`
-	Name    string         `json:"name"`
-	Channel ExportChannel  `json:"channel"`
-	Params  map[string]any `json:"params"`
+	Format  string        `json:"format"`
+	Name    string        `json:"name"`
+	Channel ExportChannel `json:"channel"`
+	// Kind is the connection kind (KindReverseCall, ...) the values are
+	// for.
+	Kind   string         `json:"kind"`
+	Params map[string]any `json:"params"`
 }
 
 // ExportChannel is the channel kind of an endpoint export.
@@ -76,18 +82,10 @@ type ExportChannel struct {
 type BuildConnection struct {
 	Endpoint ChannelEndpointExport `json:"endpoint"`
 	Values   map[string]any        `json:"values,omitempty"`
-	// Kind is the connection's kind (KindReverseCall, ...): empty is
-	// reverse-call, as every connection was before kinds.
-	Kind string `json:"kind,omitempty"`
 }
 
-// ConnectionKind is the connection's kind, reverse-call when it says none.
-func (c BuildConnection) ConnectionKind() string {
-	if c.Kind == "" {
-		return KindReverseCall
-	}
-	return c.Kind
-}
+// ConnectionKind is the connection's kind: its endpoint's.
+func (c BuildConnection) ConnectionKind() string { return c.Endpoint.Kind }
 
 // BuildCrypto is the payload crypto a minion is built with. The payload
 // crypto contract defines the material of each suite.
@@ -355,8 +353,8 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		for i, c := range r.Connections {
 			key := fmt.Sprintf("connections[%d]", i)
 			e := c.Endpoint
-			if e.Format != ChannelEndpointExportV1 {
-				add(key, "endpoint format must be %q", ChannelEndpointExportV1)
+			if e.Format != ChannelEndpointExportV2 {
+				add(key, "endpoint format must be %q", ChannelEndpointExportV2)
 				continue
 			}
 			if !s.Supports(t, e.Channel.ModuleName, e.Channel.SchemaVersion) {
@@ -369,7 +367,7 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 				continue
 			}
 			ch, _ := s.Channel(e.Channel.ModuleName)
-			checkValues(key+".values.", ch.Fields, c.Values)
+			checkValues(key+".values.", ch.KindFields(c.ConnectionKind()), c.Values)
 		}
 	}
 

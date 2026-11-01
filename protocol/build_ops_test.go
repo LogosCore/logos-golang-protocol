@@ -26,9 +26,10 @@ const (
   "connections": [
     {
       "endpoint": {
-        "format": "logos.channel-endpoint.v1",
+        "format": "logos.channel-endpoint.v2",
         "name": "edge-eu",
         "channel": { "module_name": "http", "schema_version": 2 },
+        "kind": "reverse-call",
         "params": { "base_url": "https://edge-eu.example.com", "tls_verify": false, "request_timeout": "40s" }
       },
       "values": { "method": "POST", "path_prefix": "/cdn/assets/" }
@@ -153,7 +154,8 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		{"files." + iconID, file(func(f *BuildFile) { f.ID = "another-file" })},
 		{"files." + iconID, file(func(f *BuildFile) { f.URL = "/build-files/app.ico" })},
 		{"connections", func(r *BuildRequest) { r.Connections = nil }},
-		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Format = "logos.channel-endpoint.v2" }},
+		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Format = "logos.channel-endpoint.v1" }},
+		{"connections[0].kind", func(r *BuildRequest) { r.Connections[0].Endpoint.Kind = KindBindCall }},
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.SchemaVersion = 3 }},
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.ModuleName = "smtp" }},
 		{"connections[0].values.method", func(r *BuildRequest) { r.Connections[0].Values["method"] = "PATCH" }},
@@ -231,7 +233,7 @@ func TestValidateBuildRequest_Commands(t *testing.T) {
 func TestValidateBuildRequest_ShellcodeCannotUseDNS(t *testing.T) {
 	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
 	r.Connections = append(r.Connections, BuildConnection{Endpoint: ChannelEndpointExport{
-		Format: ChannelEndpointExportV1, Name: "dns-backup",
+		Format: ChannelEndpointExportV2, Name: "dns-backup", Kind: KindReverseCall,
 		Channel: ExportChannel{ModuleName: "dns", SchemaVersion: 1},
 	}})
 	if p := ValidateBuildRequest(s, r); p != nil {
@@ -245,7 +247,7 @@ func TestValidateBuildRequest_ShellcodeCannotUseDNS(t *testing.T) {
 
 func TestValidateBuildRequest_ConnectionFile(t *testing.T) {
 	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
-	s.Channels[0].Fields = append(s.Channels[0].Fields, FieldSpec{Key: "client_cert", Type: FieldFile, Accept: []string{".pem"}})
+	s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, FieldSpec{Key: "client_cert", Type: FieldFile, Accept: []string{".pem"}})
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatal(err)
 	}
