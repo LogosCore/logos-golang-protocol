@@ -364,3 +364,19 @@ func TestResultDataPastTheItemLimit(t *testing.T) {
 		t.Fatal("more than 256 items passed")
 	}
 }
+
+func TestConnUpdate(t *testing.T) {
+	data, _ := MarshalCBOR(ConnUpdateItem{T: ItemConnUpdate, Conn: 2, Reason: "operator"})
+	var got ConnUpdateItem
+	if err := UnmarshalCBOR(data, &got); err != nil || got.Conn != 2 || got.Reason != "operator" || got.Validate() != nil {
+		t.Fatalf("%+v: %v", got, err)
+	}
+	for _, bad := range []ConnUpdateItem{{Conn: 0}, {Conn: 1, Reason: string(make([]byte, MaxConnReason+1))}} {
+		if bad.Validate() == nil {
+			t.Errorf("%+v passed", bad)
+		}
+	}
+	if ItemName(ItemConnUpdate) != "conn_update" {
+		t.Error(ItemName(ItemConnUpdate))
+	}
+}

@@ -27,7 +27,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		want string
 	}{
 		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, upload_file, upload_stream, walk_dir)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, switch_connection, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -60,6 +60,16 @@ func TestCommandResultsAndActions(t *testing.T) {
 	rm.Result = ResultDirListing
 	if err := validateBuildCommand(rm, nil); err == nil {
 		t.Error("delete_path with a result: taken")
+	}
+	// switch_connection: conn, no result; BOB's for has a default.
+	connect := BuildCommand{ID: "connect", Action: ActionSwitchConnection, Params: []FieldSpec{
+		{Key: "conn", Type: FieldInt, Required: true, Min: 1}, {Key: "for", Type: FieldDuration, Default: "0s"}}}
+	if err := validateBuildCommand(connect, nil); err != nil {
+		t.Errorf("switch_connection: %v", err)
+	}
+	connect.Params[0].Type = FieldString
+	if err := validateBuildCommand(connect, nil); err == nil || !strings.Contains(err.Error(), `takes a int param "conn"`) {
+		t.Errorf("switch_connection with a text conn: %v", err)
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")

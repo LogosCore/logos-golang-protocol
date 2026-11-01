@@ -61,6 +61,8 @@ const (
 	ItemAck      = 11
 	ItemChunk    = 12
 	ItemErr      = 13
+	// ItemConnUpdate: the minion moved to another of its connections.
+	ItemConnUpdate = 14
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -68,7 +70,7 @@ var itemNames = map[int]string{
 	ItemStage: "stage", ItemStageResponse: "stage_response", ItemHello: "hello",
 	ItemHelloResponse: "hello_response", ItemSleepUpdate: "sleep_update", 6: "rehello",
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
-	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err",
+	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -147,6 +149,10 @@ type HelloItem struct {
 	// Sleep is the check-in schedule the minion starts with; nil when it
 	// does not say.
 	Sleep *Sleep `cbor:"14,keyasint,omitempty"`
+	// Conn is the connection the minion says hello through: its place in
+	// the build's connections, from 1 (BuildRequest.Connections), so a
+	// minion carries no connection names. 0 when it does not say.
+	Conn uint64 `cbor:"16,keyasint,omitempty"`
 }
 
 // Sleep is a minion's check-in schedule: Interval milliseconds between
@@ -177,6 +183,32 @@ type SleepUpdateItem struct {
 
 // Sleep is the schedule the item says.
 func (u SleepUpdateItem) Sleep() Sleep { return Sleep{Interval: u.Interval, Jitter: u.Jitter} }
+
+// MaxConnReason caps a conn_update's reason, in bytes.
+const MaxConnReason = 256
+
+// ConnUpdateItem says the minion moved to another of its connections,
+// whatever moved it (an operator's switch_connection, a fallback after
+// failures, its own logic): Conn is the connection's place in the build's
+// connections, from 1, as a hello's; Reason, optional, why ("fell back
+// after 5 failures"). The message carrying it goes over the new
+// connection.
+type ConnUpdateItem struct {
+	T      int    `cbor:"0,keyasint"`
+	Conn   uint64 `cbor:"1,keyasint"`
+	Reason string `cbor:"2,keyasint,omitempty"`
+}
+
+// Validate refuses a place of 0 and a reason over MaxConnReason.
+func (u ConnUpdateItem) Validate() error {
+	switch {
+	case u.Conn == 0:
+		return errors.New("conn_update: conn is a place from 1")
+	case len(u.Reason) > MaxConnReason:
+		return fmt.Errorf("conn_update: reason longer than %d bytes", MaxConnReason)
+	}
+	return nil
+}
 
 // Integrity levels a hello may say: Windows' integrity levels, or root and
 // user elsewhere.
