@@ -128,3 +128,58 @@ func TestReadDirListing(t *testing.T) {
 		}
 	}
 }
+
+func TestListingPiece(t *testing.T) {
+	size := uint64(3)
+	entries := []DirEntry{{Name: "a.txt", Type: DirEntryFile, Size: &size}, {Name: "docs", Type: DirEntryDir}}
+	ok := map[string]ListingPiece{
+		"a whole listing in one piece": {ID: 0, Part: 0, Last: true, Path: "/home/u", Sep: "/", Parent: "/home", Entries: entries},
+		"a root":                       {ID: 1, Part: 0, Path: `C:\`, Sep: `\`, Entries: entries},
+		"a later piece":                {ID: 1, Part: 2, Last: true, Entries: entries},
+		"partial":                      {ID: 2, Part: 0, Last: true, Path: "/proc/1", Sep: "/", Partial: true, Entries: entries},
+		"unreadable":                   {ID: 3, Part: 0, Last: true, Path: "/root", Sep: "/", Err: "permission denied"},
+		"an empty directory":           {ID: 4, Part: 0, Last: true, Path: "/tmp/e", Sep: "/"},
+	}
+	for name, p := range ok {
+		if err := p.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string]ListingPiece{
+		"the first without a path":     {Part: 0, Sep: "/"},
+		"the first with a bad sep":     {Part: 0, Path: "/x", Sep: ":"},
+		"a later piece naming the dir": {Part: 1, Path: "/x"},
+		"an err with entries":          {Part: 0, Last: true, Path: "/x", Sep: "/", Err: "denied", Entries: entries},
+		"an err not last":              {Part: 0, Path: "/x", Sep: "/", Err: "denied"},
+		"an err on a later piece":      {Part: 1, Last: true, Err: "denied"},
+		"an entry without a type":      {Part: 0, Path: "/x", Sep: "/", Entries: []DirEntry{{Name: "a"}}},
+		"an entry named with a slash":  {Part: 0, Path: "/x", Sep: "/", Entries: []DirEntry{{Name: "a/b", Type: DirEntryFile}}},
+		"an entry named ..":            {Part: 0, Path: "/x", Sep: "/", Entries: []DirEntry{{Name: "..", Type: DirEntryDir}}},
+	}
+	for name, p := range bad {
+		if p.Validate() == nil {
+			t.Errorf("%s passed", name)
+		}
+	}
+}
+
+func TestResultItemListings(t *testing.T) {
+	task := make([]byte, 16)
+	r := ResultItem{T: ItemResult, Task: task, Seq: 0, Ls: []ListingPiece{{ID: 0, Part: 0, Last: true, Path: "/", Sep: "/"}}}
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// Through CBOR and back, as a minion sends it.
+	b, err := cborEnc.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ResultItem
+	if err := cborDec.Unmarshal(b, &back); err != nil || len(back.Ls) != 1 || back.Ls[0].Path != "/" || !back.Ls[0].Last {
+		t.Fatalf("round trip: %+v %v", back, err)
+	}
+	r.Ls = append(r.Ls, ListingPiece{ID: 1, Part: 1, Path: "/x"})
+	if r.Validate() == nil {
+		t.Fatal("a bad piece passed")
+	}
+}

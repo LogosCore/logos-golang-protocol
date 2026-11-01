@@ -21,7 +21,7 @@ func TestLogsStartRequestValidate(t *testing.T) {
 }
 
 func TestLogLevelRank(t *testing.T) {
-	if !(LogDebug.Rank() < LogInfo.Rank() && LogInfo.Rank() < LogWarn.Rank() && LogWarn.Rank() < LogError.Rank()) {
+	if LogDebug.Rank() >= LogInfo.Rank() || LogInfo.Rank() >= LogWarn.Rank() || LogWarn.Rank() >= LogError.Rank() {
 		t.Error("levels out of order")
 	}
 	if LogLevel("x").Rank() != LogInfo.Rank() || LogLevel("x").Valid() {
