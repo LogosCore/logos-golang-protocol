@@ -177,3 +177,62 @@ func TestStreamParam(t *testing.T) {
 		t.Fatal("a stream offer with a size: taken")
 	}
 }
+
+func TestTransferCtx(t *testing.T) {
+	xfer := make([]byte, 16)
+	total := uint64(3)
+	ok := ChunkItem{T: ItemChunk, Xfer: xfer, Data: []byte("abc"), Total: &total, Task: xfer, Ctx: []byte("path")}
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	ok.Ctx = make([]byte, MaxTransferCtx+1)
+	if ok.Validate() == nil {
+		t.Error("a chunk's ctx over the limit")
+	}
+	next := uint64(0)
+	if err := (AckItem{T: ItemAck, Xfer: xfer, Next: &next, Ctx: []byte("p")}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if (AckItem{T: ItemAck, Ctx: []byte("p")}).Validate() == nil {
+		t.Error("an ack's ctx without xfer")
+	}
+	if (AckItem{T: ItemAck, Xfer: xfer, Next: &next, Ctx: make([]byte, MaxTransferCtx+1)}).Validate() == nil {
+		t.Error("an ack's ctx over the limit")
+	}
+	// It round-trips at its key: a chunk's 8, an ack's 5.
+	b, _ := MarshalCBOR(AckItem{T: ItemAck, Xfer: xfer, Next: &next, Ctx: []byte{9}})
+	var back map[uint64]any
+	_ = UnmarshalCBOR(b, &back)
+	if _, has := back[5]; !has {
+		t.Errorf("ack keys %v", back)
+	}
+}
+
+func TestResumeAndTaskCtx(t *testing.T) {
+	task := make([]byte, 16)
+	if err := (ResumeItem{T: ItemResume, Task: task, Ctx: []byte("at=/a/b")}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, r := range map[string]ResumeItem{
+		"no ctx":     {T: ItemResume, Task: task},
+		"long ctx":   {T: ItemResume, Task: task, Ctx: make([]byte, MaxTransferCtx+1)},
+		"short task": {T: ItemResume, Task: task[:4], Ctx: []byte("x")},
+	} {
+		if r.Validate() == nil {
+			t.Errorf("%s: valid", name)
+		}
+	}
+	ok := true
+	if (ResultItem{T: ItemResult, Task: task, Done: true, OK: &ok, Ctx: []byte("x")}).Validate() == nil {
+		t.Error("a done part with ctx")
+	}
+	if err := (ResultItem{T: ItemResult, Task: task, Ctx: []byte("x")}).Validate(); err != nil {
+		t.Errorf("a part with ctx: %v", err)
+	}
+	if (CancelItem{T: ItemCancel, Task: task, Ctx: make([]byte, MaxTransferCtx+1)}).Validate() == nil {
+		t.Error("a cancel's long ctx")
+	}
+	if ItemName(ItemResume) != "resume" {
+		t.Error(ItemName(ItemResume))
+	}
+}
