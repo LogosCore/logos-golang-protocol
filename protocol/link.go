@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"unicode/utf8"
 )
 
@@ -82,6 +83,12 @@ const (
 //   - Failure: nothing came back.
 //   - neither: something answered that is not a minion message (an HTTP
 //     404, a WAF's page): Status, and Excerpt, the start of what came back.
+//
+// An answer that reached something may carry Peer: the IP address the
+// channel connected to (the minion's external address, as a reverse
+// channel's Logos-Peer-Address is), when the channel knows it without a
+// lookup of its own: dialed directly, or the target an IP address. Empty
+// for a host name a proxy resolved.
 type LinkFrame struct {
 	Type     int            `cbor:"0,keyasint"`
 	Request  uint64         `cbor:"1,keyasint"`
@@ -92,6 +99,7 @@ type LinkFrame struct {
 	Status   int            `cbor:"6,keyasint,omitempty"`
 	Failure  *LinkFailure   `cbor:"7,keyasint,omitempty"`
 	Excerpt  []byte         `cbor:"8,keyasint,omitempty"`
+	Peer     string         `cbor:"9,keyasint,omitempty"`
 }
 
 // LinkFailure is why a call reached nothing: Kind (LinkFailUnreachable,
@@ -140,11 +148,11 @@ func (f LinkFrame) Validate() error {
 			return errors.New("link call: the id is 16 bytes")
 		case len(f.Data) == 0:
 			return errors.New("link call: no message")
-		case f.Status != 0 || f.Failure != nil || f.Excerpt != nil:
+		case f.Status != 0 || f.Failure != nil || f.Excerpt != nil || f.Peer != "":
 			return errors.New("link call: an answer's keys")
 		}
 	case LinkOpen:
-		if f.ID != nil || f.Data != nil || f.Status != 0 || f.Failure != nil || f.Excerpt != nil {
+		if f.ID != nil || f.Data != nil || f.Status != 0 || f.Failure != nil || f.Excerpt != nil || f.Peer != "" {
 			return errors.New("link open: only request, values and deadline")
 		}
 	case LinkAnswer:
@@ -163,6 +171,13 @@ func (f LinkFrame) Validate() error {
 			return fmt.Errorf("link answer: the excerpt is %d bytes at most", MaxLinkExcerpt)
 		case f.Status < 0 || f.Status > 999:
 			return errors.New("link answer: status is 0 to 999")
+		case f.Peer != "" && f.Failure != nil:
+			return errors.New("link answer: a failure reached no peer")
+		}
+		if f.Peer != "" {
+			if _, err := netip.ParseAddr(f.Peer); err != nil {
+				return fmt.Errorf("link answer: peer %q is not an IP address", f.Peer)
+			}
 		}
 		if f.Failure != nil {
 			if _, ok := linkFailNames[f.Failure.Kind]; !ok {

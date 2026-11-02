@@ -12,6 +12,8 @@ func TestLinkFrameRoundTrip(t *testing.T) {
 		{Type: LinkCall, Request: 1, Values: map[string]any{"url": "http://x/a.php", "tls_verify": true}, ID: id, Data: []byte{1, 2}, Deadline: 30000},
 		{Type: LinkOpen, Request: 2, Values: map[string]any{"host": "10.0.0.1"}},
 		{Type: LinkAnswer, Request: 1, ID: id, Data: []byte{3}, Status: 200},
+		{Type: LinkAnswer, Request: 1, ID: id, Data: []byte{3}, Status: 200, Peer: "203.0.113.7"},
+		{Type: LinkAnswer, Request: 1, Status: 404, Excerpt: []byte("<html>"), Peer: "2001:db8::1"},
 		{Type: LinkAnswer, Request: 1, Failure: &LinkFailure{Kind: LinkFailTimeout, Msg: "no answer in 30s"}},
 		{Type: LinkAnswer, Request: 1, Status: 404, Excerpt: []byte("<html>")},
 	}
@@ -46,6 +48,9 @@ func TestLinkFrameRefused(t *testing.T) {
 		"failure unknown kind": {Type: LinkAnswer, Request: 1, Failure: &LinkFailure{Kind: 9}},
 		"failure long message": {Type: LinkAnswer, Request: 1, Failure: &LinkFailure{Kind: 1, Msg: strings.Repeat("x", MaxLinkFailureMsg+1)}},
 		"excerpt too long":     {Type: LinkAnswer, Request: 1, Status: 404, Excerpt: make([]byte, MaxLinkExcerpt+1)},
+		"peer not an address":  {Type: LinkAnswer, Request: 1, Status: 404, Peer: "example.com"},
+		"peer on a failure":    {Type: LinkAnswer, Request: 1, Failure: &LinkFailure{Kind: 1}, Peer: "203.0.113.7"},
+		"peer on a call":       {Type: LinkCall, Request: 1, ID: id, Data: []byte{1}, Peer: "203.0.113.7"},
 		"unknown type":         {Type: 9, Request: 1},
 	}
 	for name, f := range bad {

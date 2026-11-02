@@ -62,7 +62,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		t.Error("delete_path with a result: taken")
 	}
 	// switch_connection: conn, no result; BOB's for has a default.
-	connect := BuildCommand{ID: "connect", Action: ActionSwitchConnection, Params: []FieldSpec{
+	connect := BuildCommand{ID: "switch", Action: ActionSwitchConnection, Params: []FieldSpec{
 		{Key: "conn", Type: FieldInt, Required: true, Min: 1}, {Key: "for", Type: FieldDuration, Default: "0s"}}}
 	if err := validateBuildCommand(connect, nil); err != nil {
 		t.Errorf("switch_connection: %v", err)

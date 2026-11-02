@@ -53,7 +53,7 @@ func TestRegistry(t *testing.T) {
 		{AckItem{T: ItemAck, Tasks: [][]byte{id}, Xfer: id, Next: &one, Hold: true}, 11, []uint64{0, 1, 2, 3, 4}},
 		{ChunkItem{T: ItemChunk, Xfer: id, Off: 0, Data: id, Total: &one, SHA256: id, Task: id, Name: "n"}, 12,
 			[]uint64{0, 1, 2, 3, 4, 5, 6, 7}},
-		{ErrItem{T: ItemErr, Code: ErrItemBadMessage, Msg: "m", Item: &item}, 13, []uint64{0, 1, 2, 3}},
+		{ErrItem{T: ItemErr, Code: ErrItemBadMessage, Msg: "m", Item: &item, Task: id}, 13, []uint64{0, 1, 2, 3, 4}},
 		{ConnUpdateItem{T: ItemConnUpdate, Conn: 2, Reason: "r"}, 14, []uint64{0, 1, 2}},
 		{FileOffer{Xfer: id, Name: "n", Size: 1, SHA256: id, Stream: true}, -1, []uint64{1, 2, 3, 4, 5}},
 		{LsPiece{ID: 1, Part: 1, Last: true, Path: "/", Sep: "/", Parent: "/", Entries: []LsEntry{entry},

@@ -416,6 +416,23 @@ func ValidateBuildSchema(s BuildSchema) error {
 // answers it; it never goes to a minion, and a schema may not declare it.
 const CommandHelp = "help"
 
+// CommandConnect and CommandDisconnect are core's own commands in the
+// console of a session whose connection is bind-persistent: they open and
+// close its target's connection (core asks the channel to dial the minion,
+// or closes the connection's socket). Core runs them and keeps them as
+// tasks; they never go to a minion (a minion not connected could not get
+// one), and a schema may not declare them.
+const (
+	CommandConnect    = "connect"
+	CommandDisconnect = "disconnect"
+)
+
+// IsCoreCommand reports whether id is one of core's own commands, which a
+// build schema may not declare.
+func IsCoreCommand(id string) bool {
+	return id == CommandHelp || id == CommandConnect || id == CommandDisconnect
+}
+
 // validateCommandNumbers checks a command's op and its params' nums: each 1
 // to MaxCommandNumber, the nums once each.
 func validateCommandNumbers(c BuildCommand) error {
@@ -440,8 +457,8 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 	if !commandIDPattern.MatchString(c.ID) {
 		return fmt.Errorf("id must match %s", commandIDPattern)
 	}
-	if c.ID == CommandHelp {
-		return fmt.Errorf("%q is core's own command: a factory does not declare it", CommandHelp)
+	if IsCoreCommand(c.ID) {
+		return fmt.Errorf("%q is core's own command: a factory does not declare it", c.ID)
 	}
 	if err := validateText(c.Label, c.Description); err != nil {
 		return err

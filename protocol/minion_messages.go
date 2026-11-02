@@ -530,6 +530,9 @@ type ErrItem struct {
 	Code int    `cbor:"1,keyasint"`
 	Msg  string `cbor:"2,keyasint,omitempty"`
 	Item *int   `cbor:"3,keyasint,omitempty"`
+	// Task is the task an unknown_task names (16 bytes): core ends a task
+	// its minion does not have, cancelled when it asked to stop it.
+	Task []byte `cbor:"4,keyasint,omitempty"`
 }
 
 // Error codes of ErrItem.
