@@ -85,6 +85,11 @@ type BuildSchema struct {
 	// built with a BuildRequest.SessionID, they claim it in their hello
 	// (HelloItem.SID). Optional.
 	PersistedSessions bool `json:"persisted_sessions,omitempty"`
+	// Failover says the minions honor a build's failover settings
+	// (BuildRequest.Failover, BuildConnection.Failover): they move between
+	// their connections on their own as those say. Optional: without it,
+	// the settings still reach the factory, which may ignore them.
+	Failover bool `json:"failover,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection

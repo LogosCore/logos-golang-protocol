@@ -82,6 +82,9 @@ type ExportChannel struct {
 type BuildConnection struct {
 	Endpoint ChannelEndpointExport `json:"endpoint"`
 	Values   map[string]any        `json:"values,omitempty"`
+	// Failover is the connection's own failover settings (failover.go);
+	// nil: the build's, and FailoverAuto's default.
+	Failover *ConnectionFailover `json:"failover,omitempty"`
 }
 
 // ConnectionKind is the connection's kind: its endpoint's.
@@ -124,6 +127,11 @@ type BuildRequest struct {
 	// Connections are the chosen endpoints, in the order the minion tries
 	// them.
 	Connections []BuildConnection `json:"connections"`
+	// Failover is how the minion moves between them on its own
+	// (failover.go): core sends it with defaults filled in; nil (an older
+	// core) means DefaultBuildFailover. A factory that does not declare
+	// BuildSchema.Failover may ignore it.
+	Failover *BuildFailover `json:"failover,omitempty"`
 	// Files are the files that values name, by id.
 	Files map[string]BuildFile `json:"files,omitempty"`
 	// Crypto is set when the factory declares a crypto suite.
@@ -368,6 +376,16 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 			}
 			ch, _ := s.Channel(e.Channel.ModuleName)
 			checkValues(key+".values.", ch.KindFields(c.ConnectionKind()), c.Values)
+			if c.Failover != nil {
+				for k, reason := range c.Failover.Validate() {
+					add(key+".failover."+k, "%s", reason)
+				}
+			}
+		}
+	}
+	if r.Failover != nil {
+		for k, reason := range r.Failover.Validate() {
+			add("failover."+k, "%s", reason)
 		}
 	}
 
