@@ -150,8 +150,13 @@ type BuildRequest struct {
 	// SessionID is the persisted session the minion claims in its hello, a
 	// lowercase UUID; set only for a factory that declares
 	// BuildSchema.PersistedSessions. The factory builds it in.
-	SessionID string         `json:"session_id,omitempty"`
-	Artifact  ArtifactUpload `json:"artifact"`
+	SessionID string `json:"session_id,omitempty"`
+	// MaxTasks is how many tasks the minion runs at once as it starts, 0
+	// (it takes none until core says otherwise) to MaxTasksLimit; set only
+	// for a factory that declares BuildSchema.MaxTasks, nil meaning
+	// DefaultMaxTasks.
+	MaxTasks *uint64        `json:"max_tasks,omitempty"`
+	Artifact ArtifactUpload `json:"artifact"`
 	// Deadline is when core stops waiting for the result.
 	Deadline time.Time `json:"deadline"`
 	Actor    *Actor    `json:"actor,omitempty"`
@@ -319,6 +324,14 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 	}
 	if r.SchemaVersion != s.Version {
 		add("schema_version", "the factory's build schema is version %d", s.Version)
+	}
+	if r.MaxTasks != nil {
+		switch {
+		case !s.MaxTasks:
+			add("max_tasks", "the factory's minions take no max_tasks")
+		case *r.MaxTasks > MaxTasksLimit:
+			add("max_tasks", "%d at most", MaxTasksLimit)
+		}
 	}
 	if r.SessionID != "" {
 		switch {

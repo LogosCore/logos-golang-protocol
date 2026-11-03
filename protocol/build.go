@@ -90,6 +90,13 @@ type BuildSchema struct {
 	// their connections on their own as those say. Optional: without it,
 	// the settings still reach the factory, which may ignore them.
 	Failover bool `json:"failover,omitempty"`
+	// MaxTasks says the minions' limit of tasks at once is the operators'
+	// to set: the build's (BuildRequest.MaxTasks) as they start, which
+	// core changes live (MaxTasksItem); they say it in their hello.
+	// Optional: without it, a build has no max_tasks, and a minion runs as
+	// many as its factory made it (one at a time, say), which its hello may
+	// report but core never changes.
+	MaxTasks bool `json:"max_tasks,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection
@@ -455,10 +462,24 @@ const (
 	CommandDisconnect = "disconnect"
 )
 
+// CommandMaxTasks is core's own command in the console of a session whose
+// build's factory declares BuildSchema.MaxTasks: it sets how many tasks the
+// minion runs at once (its param max, 0 to MaxTasksLimit), as the session's
+// Tasks do. Core runs it and keeps it as a task, which ends when the minion
+// says it has the limit (MaxTasksItem), or when it does not take it; it
+// never goes to a minion as a task, and a schema may not declare it.
+const CommandMaxTasks = "max_tasks"
+
+// CoreCommands are core's own commands: core runs them, they never go to a
+// minion as tasks, and a build schema may not declare them.
+func CoreCommands() []string {
+	return []string{CommandHelp, CommandConnect, CommandDisconnect, CommandMaxTasks}
+}
+
 // IsCoreCommand reports whether id is one of core's own commands, which a
 // build schema may not declare.
 func IsCoreCommand(id string) bool {
-	return id == CommandHelp || id == CommandConnect || id == CommandDisconnect
+	return slices.Contains(CoreCommands(), id)
 }
 
 // validateCommandNumbers checks a command's op and its params' nums: each 1

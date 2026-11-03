@@ -46,9 +46,44 @@ type dirWalkWire struct {
 	X       map[string]any `cbor:"7,keyasint,omitempty"`
 }
 
+type volumesWire struct {
+	Sep     string         `cbor:"1,keyasint"`
+	Volumes []volumeWire   `cbor:"2,keyasint,omitempty"`
+	X       map[string]any `cbor:"3,keyasint,omitempty"`
+}
+
+type volumeWire struct {
+	Path     string         `cbor:"1,keyasint"`
+	Kind     string         `cbor:"2,keyasint"`
+	Device   string         `cbor:"3,keyasint,omitempty"`
+	Label    string         `cbor:"4,keyasint,omitempty"`
+	FS       string         `cbor:"5,keyasint,omitempty"`
+	Size     *uint64        `cbor:"6,keyasint,omitempty"`
+	Free     *uint64        `cbor:"7,keyasint,omitempty"`
+	ReadOnly bool           `cbor:"8,keyasint,omitempty"`
+	NoMedia  bool           `cbor:"9,keyasint,omitempty"`
+	X        map[string]any `cbor:"10,keyasint,omitempty"`
+}
+
+func (v Volumes) wire() volumesWire {
+	w := volumesWire{Sep: v.Sep, X: v.X}
+	for _, vol := range v.Volumes {
+		w.Volumes = append(w.Volumes, volumeWire(vol))
+	}
+	return w
+}
+
+func (w volumesWire) named() Volumes {
+	v := Volumes{Sep: w.Sep, X: w.X}
+	for _, vol := range w.Volumes {
+		v.Volumes = append(v.Volumes, Volume(vol))
+	}
+	return v
+}
+
 // WireResultData encodes a result part's data as it travels: a
-// FileDownload, FileUpload, FileStream or DirWalk numbered, anything else
-// (a factory's own shape) as ResultData does.
+// FileDownload, FileUpload, FileStream, DirWalk or Volumes numbered,
+// anything else (a factory's own shape) as ResultData does.
 func WireResultData(v any) (cbor.RawMessage, error) {
 	switch d := v.(type) {
 	case FileDownload:
@@ -67,6 +102,10 @@ func WireResultData(v any) (cbor.RawMessage, error) {
 		v = dirWalkWire(d)
 	case *DirWalk:
 		v = dirWalkWire(*d)
+	case Volumes:
+		v = d.wire()
+	case *Volumes:
+		v = d.wire()
 	}
 	return ResultData(v)
 }
@@ -97,6 +136,10 @@ func NamedResultData(result string, data cbor.RawMessage) (cbor.RawMessage, erro
 		var w dirWalkWire
 		err = cborDec.Unmarshal(data, &w)
 		named = DirWalk(w)
+	case ResultVolumes:
+		var w volumesWire
+		err = cborDec.Unmarshal(data, &w)
+		named = w.named()
 	default:
 		return data, nil
 	}

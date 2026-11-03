@@ -26,8 +26,8 @@ func TestCommandResultsAndActions(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, stream_file, switch_connection, upload_file, upload_stream, walk_dir)`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, volumes)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delete_path, download_file, list_dir, list_volumes, stream_file, switch_connection, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -209,5 +209,50 @@ func TestDirWalk(t *testing.T) {
 	}
 	if a, ok := KnownAction(ActionWalkDir); !ok || a.Result != ResultDirWalk || a.Params["path"] != FieldString || !KnownResult(ResultDirWalk) {
 		t.Fatalf("walk_dir: %+v", a)
+	}
+}
+
+// A volumes part: its separator, and each volume absolute on the host with
+// a kind; list_volumes takes nothing and needs the result.
+func TestVolumes(t *testing.T) {
+	size, free := uint64(64<<30), uint64(20<<30)
+	for _, ok := range []Volumes{
+		{Sep: `\`, Volumes: []Volume{{Path: `C:\`, Kind: VolumeFixed, Label: "System", FS: "NTFS", Size: &size, Free: &free},
+			{Path: `D:\`, Kind: VolumeOptical, NoMedia: true}, {Path: `Z:\`, Kind: VolumeNetwork, Device: `\\nas\share`}}},
+		{Sep: "/", Volumes: []Volume{{Path: "/", Kind: VolumeOther, FS: "overlay"}, {Path: "/boot", Kind: VolumeFixed, Device: "/dev/sda1", ReadOnly: true}}},
+		{Sep: "/"},
+	} {
+		data, err := ResultData(ok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := ReadVolumes(0, data)
+		if err != nil || len(v.Volumes) != len(ok.Volumes) {
+			t.Fatalf("%+v: %+v %v", ok, v, err)
+		}
+	}
+	for name, bad := range map[string]Volumes{
+		"sep":          {Sep: "", Volumes: []Volume{{Path: "/", Kind: VolumeFixed}}},
+		"relative":     {Sep: "/", Volumes: []Volume{{Path: "mnt", Kind: VolumeFixed}}},
+		"unix on win":  {Sep: `\`, Volumes: []Volume{{Path: "/", Kind: VolumeFixed}}},
+		"a bare drive": {Sep: `\`, Volumes: []Volume{{Path: "C:", Kind: VolumeFixed}}},
+		"no kind":      {Sep: "/", Volumes: []Volume{{Path: "/"}}},
+	} {
+		data, _ := ResultData(bad)
+		if _, err := ReadVolumes(0, data); err == nil {
+			t.Errorf("%s passed", name)
+		}
+	}
+	if a, ok := KnownAction(ActionListVolumes); !ok || a.Result != ResultVolumes || len(a.Params) != 0 || !KnownResult(ResultVolumes) {
+		t.Fatalf("list_volumes: %+v", a)
+	}
+	// A command of it takes no param core must give; its own have defaults.
+	c := BuildCommand{ID: "volumes", Action: ActionListVolumes, Result: ResultVolumes}
+	if err := validateResultAction(c); err != nil {
+		t.Fatal(err)
+	}
+	c.Result = ResultDirListing
+	if err := validateResultAction(c); err == nil || !strings.Contains(err.Error(), `needs result "volumes"`) {
+		t.Fatalf("a list_volumes command without its result: %v", err)
 	}
 }

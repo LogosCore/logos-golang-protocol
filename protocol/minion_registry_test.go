@@ -201,12 +201,15 @@ func TestResultDataWire(t *testing.T) {
 		ResultFileUpload:   &FileUpload{Xfer: xfer, Path: "/tmp/a", Size: 9, SHA256: sum},
 		ResultFileStream:   FileStream{Xfer: xfer, Path: "/big", Size: 1 << 40},
 		ResultDirWalk:      DirWalk{Root: "/", Folders: 3, Entries: 40, Unread: 1, Current: "/usr"},
+		ResultVolumes: Volumes{Sep: "/", Volumes: []Volume{{Path: "/boot", Kind: VolumeFixed, Device: "/dev/sda1", Size: &[]uint64{1 << 30}[0],
+			X: map[string]any{"uuid": "e4"}}}},
 	} {
 		wire, err := WireResultData(v)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(wire, []byte("path")) || bytes.Contains(wire, []byte("root")) || bytes.Contains(wire, []byte("xfer")) {
+		if bytes.Contains(wire, []byte("path")) || bytes.Contains(wire, []byte("root")) || bytes.Contains(wire, []byte("xfer")) ||
+			bytes.Contains(wire, []byte("kind")) {
 			t.Errorf("%s: names on the wire: %x", result, wire)
 		}
 		named, err := NamedResultData(result, wire)
@@ -229,6 +232,11 @@ func TestResultDataWire(t *testing.T) {
 		case ResultDirWalk:
 			if w, err := ReadDirWalk(0, named); err != nil || w.Folders != 3 || w.Current != "/usr" {
 				t.Errorf("walk: %+v %v", w, err)
+			}
+		case ResultVolumes:
+			if v, err := ReadVolumes(0, named); err != nil || len(v.Volumes) != 1 || v.Volumes[0].Device != "/dev/sda1" ||
+				*v.Volumes[0].Size != 1<<30 || v.Volumes[0].X["uuid"] != "e4" {
+				t.Errorf("volumes: %+v %v", v, err)
 			}
 		}
 	}

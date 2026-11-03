@@ -75,6 +75,10 @@ const (
 	// something of its may go on any moment (a stream it holds whose
 	// downloader or uploader is there).
 	ItemPoll = 16
+	// ItemMaxTasks: how many tasks the minion runs at once (MaxTasksItem):
+	// core sets it (core → minion), the minion says what it is now
+	// (minion → core).
+	ItemMaxTasks = 17
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -83,7 +87,7 @@ var itemNames = map[int]string{
 	ItemHelloResponse: "hello_response", ItemSleepUpdate: "sleep_update", ItemRehello: "rehello",
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
-	ItemPoll: "poll",
+	ItemPoll: "poll", ItemMaxTasks: "max_tasks",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -175,6 +179,11 @@ type HelloItem struct {
 	// the build's connections, from 1 (BuildRequest.Connections), so a
 	// minion carries no connection names. 0 when it does not say.
 	Conn uint64 `cbor:"16,keyasint,omitempty"`
+	// MaxTasks is how many tasks the minion runs at once as it starts; nil
+	// when it does not say. Any minion may say it (one that runs a task at
+	// a time: 1); one whose factory declares BuildSchema.MaxTasks takes
+	// core's MaxTasksItem too, and must say it.
+	MaxTasks *uint64 `cbor:"17,keyasint,omitempty"`
 }
 
 // Sleep is a minion's check-in schedule: Interval milliseconds between
@@ -301,6 +310,8 @@ func (h HelloItem) Validate() error {
 		return errors.New("hello: a machine id is a source and a value")
 	case h.MachineValue != "" && ValidateMachineID(h.MachineID()) != nil:
 		return fmt.Errorf("hello: %w", ValidateMachineID(h.MachineID()))
+	case h.MaxTasks != nil && *h.MaxTasks > MaxTasksLimit:
+		return fmt.Errorf("hello: max_tasks is %d at most", MaxTasksLimit)
 	case h.Sleep != nil:
 		return h.Sleep.Validate()
 	}

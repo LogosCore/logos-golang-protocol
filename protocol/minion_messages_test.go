@@ -162,10 +162,33 @@ func TestHello(t *testing.T) {
 		{PID: 1, OS: "linux", Arch: "amd64", SID: []byte{1, 2, 3}},
 		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 0}},
 		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 1000, Jitter: 101}},
+		{PID: 1, OS: "linux", Arch: "amd64", MaxTasks: &[]uint64{MaxTasksLimit + 1}[0]},
 	} {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v passed", bad)
 		}
+	}
+}
+
+// A max_tasks travels as {0: 17, 1: max} both ways, 0 (a pause) to
+// MaxTasksLimit; the hello says the limit a minion starts with.
+func TestMaxTasks(t *testing.T) {
+	data, _ := MarshalCBOR(MaxTasksItem{T: ItemMaxTasks, Max: 0})
+	var got MaxTasksItem
+	if err := UnmarshalCBOR(data, &got); err != nil || got.Max != 0 || got.Validate() != nil || ItemType(data) != ItemMaxTasks {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if (MaxTasksItem{Max: MaxTasksLimit + 1}).Validate() == nil {
+		t.Fatal("a limit over MaxTasksLimit passed")
+	}
+	five := uint64(DefaultMaxTasks)
+	data, _ = MarshalCBOR(HelloItem{T: ItemHello, PID: 1, OS: "windows", Arch: "amd64", MaxTasks: &five})
+	var h HelloItem
+	if err := UnmarshalCBOR(data, &h); err != nil || h.MaxTasks == nil || *h.MaxTasks != 5 || h.Validate() != nil {
+		t.Fatalf("hello %+v %v", h, err)
+	}
+	if ItemName(ItemMaxTasks) != "max_tasks" {
+		t.Fatal(ItemName(ItemMaxTasks))
 	}
 }
 

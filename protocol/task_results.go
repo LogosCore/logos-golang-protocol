@@ -36,6 +36,9 @@ const (
 	// (DirWalk): its listings go to core as they come (ResultItem.Ls), the
 	// data says where it stands.
 	ResultDirWalk = "dir_walk"
+	// ResultVolumes is the host's volumes (Volumes): its drives, the file
+	// systems it has mounted, each with where its files are.
+	ResultVolumes = "volumes"
 )
 
 // Actions.
@@ -64,6 +67,10 @@ const (
 	// the command goes: core gives path; the command's result is a
 	// ResultDirWalk.
 	ActionWalkDir = "walk_dir"
+	// ActionListVolumes lists the host's volumes: core gives nothing; the
+	// command's result is a ResultVolumes. The file browser runs it for a
+	// machine's roots (a Windows host's drives).
+	ActionListVolumes = "list_volumes"
 	// ActionSwitchConnection moves the minion to another of its build's
 	// connections: core gives conn, its place in the build's connections,
 	// from 1 (a param of FormatConnection, so the UI offers them by name). It has no result: the task's output says how it went, and a
@@ -80,6 +87,7 @@ var results = map[string]bool{
 	ResultFileUpload:   true,
 	ResultFileStream:   true,
 	ResultDirWalk:      true,
+	ResultVolumes:      true,
 }
 
 // CommandAction is an action's contract: the params core gives when it runs a
@@ -100,8 +108,9 @@ var actions = map[string]CommandAction{
 	ActionStreamFile: {Params: map[string]FieldType{"path": FieldString}, Result: ResultFileStream},
 	ActionUploadStream: {Params: map[string]FieldType{"path": FieldString, "stream": FieldStream, "overwrite": FieldBool},
 		Result: ResultFileUpload},
-	ActionDeletePath: {Params: map[string]FieldType{"path": FieldString, "recursive": FieldBool}},
-	ActionWalkDir:    {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
+	ActionDeletePath:       {Params: map[string]FieldType{"path": FieldString, "recursive": FieldBool}},
+	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
+	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
 }
 

@@ -195,6 +195,28 @@ func TestValidateBuildRequest_SessionID(t *testing.T) {
 	}
 }
 
+// A limit of tasks goes only to a factory whose minions take one, within
+// MaxTasksLimit; 0 is a limit (the minion starts paused).
+func TestValidateBuildRequest_MaxTasks(t *testing.T) {
+	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
+	n := uint64(5)
+	r.MaxTasks = &n
+	if p := ValidateBuildRequest(s, r); p["max_tasks"] == "" || len(p) != 1 {
+		t.Fatalf("a factory without max_tasks: %v", p)
+	}
+	s.MaxTasks = true
+	for _, ok := range []uint64{0, 5, MaxTasksLimit} {
+		n = ok
+		if p := ValidateBuildRequest(s, r); p != nil {
+			t.Fatalf("%d: %v", ok, p)
+		}
+	}
+	n = MaxTasksLimit + 1
+	if p := ValidateBuildRequest(s, r); p["max_tasks"] == "" {
+		t.Fatal("a limit over MaxTasksLimit passed")
+	}
+}
+
 func TestValidateBuildRequest_TargetFields(t *testing.T) {
 	// The service target has no icon and needs a service name.
 	r := exampleBuildRequest(t)
