@@ -79,6 +79,9 @@ const (
 	// core sets it (core → minion), the minion says what it is now
 	// (minion → core).
 	ItemMaxTasks = 17
+	// ItemFeedback: a warning or an error of the minion's, for its
+	// operators (FeedbackItem; minion → core).
+	ItemFeedback = 18
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -87,7 +90,7 @@ var itemNames = map[int]string{
 	ItemHelloResponse: "hello_response", ItemSleepUpdate: "sleep_update", ItemRehello: "rehello",
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
-	ItemPoll: "poll", ItemMaxTasks: "max_tasks",
+	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
