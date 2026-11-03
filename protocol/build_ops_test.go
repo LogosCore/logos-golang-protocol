@@ -160,6 +160,7 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.ModuleName = "smtp" }},
 		{"connections[0].values.method", func(r *BuildRequest) { r.Connections[0].Values["method"] = "PATCH" }},
 		{"connections[0].values.color", func(r *BuildRequest) { r.Connections[0].Values["color"] = "red" }},
+		{"connections[0].max_message", func(r *BuildRequest) { r.Connections[0].MaxMessage = 100 }},
 		{"connections[0].failover.fail_after", func(r *BuildRequest) { r.Connections[0].Failover = &ConnectionFailover{FailAfter: -1} }},
 		{"failover.fail_for", func(r *BuildRequest) { f := DefaultBuildFailover(); f.FailFor = "a while"; r.Failover = &f }},
 		{"crypto", func(r *BuildRequest) { r.Crypto = nil }},

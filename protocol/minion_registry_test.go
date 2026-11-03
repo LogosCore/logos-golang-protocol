@@ -35,7 +35,7 @@ func TestRegistry(t *testing.T) {
 		keys []uint64
 	}{
 		{MinionMessage{V: MinionMessageV3, ID: id, Re: id, Items: []cbor.RawMessage{{0xa0}}}, -1, []uint64{0, 1, 2, 3}},
-		{CoreMessage{V: MinionMessageV3, ID: id, Re: id, Items: []cbor.RawMessage{{0xa0}}}, -1, []uint64{0, 1, 2, 3}},
+		{CoreMessage{V: MinionMessageV3, ID: id, Re: id, Items: []cbor.RawMessage{{0xa0}}, At: 1}, -1, []uint64{0, 1, 2, 3, 4}},
 		{StageItem{T: ItemStage, Key: id, Corr: id}, 1, []uint64{0, 1, 2}},
 		{StageResponseItem{T: ItemStageResponse, TID: id, Keys: id, Corr: id}, 2, []uint64{0, 1, 2, 3}},
 		{HelloItem{T: ItemHello, PID: 1, OS: "o", Arch: "a", Host: "h", User: "u", Domain: "d", Proc: "p",
@@ -47,14 +47,17 @@ func TestRegistry(t *testing.T) {
 		{SleepUpdateItem{T: ItemSleepUpdate, Interval: 1, Jitter: 2}, 5, []uint64{0, 1, 2}},
 		{GetTasksItem{T: ItemGetTasks, Max: &one}, 7, []uint64{0, 1}},
 		{TaskItem{T: ItemTask, Task: id, Cmd: 3, Args: Args{1: 1}}, 8, []uint64{0, 1, 2, 3}},
-		{CancelItem{T: ItemCancel, Task: id}, 9, []uint64{0, 1}},
+		{CancelItem{T: ItemCancel, Task: id, Ctx: id}, 9, []uint64{0, 1, 2}},
 		{ResultItem{T: ItemResult, Task: id, Seq: 1, Done: true, OK: &yes, Out: id, Err: "e", Data: []byte{0xa0},
-			Exit: &code, Ls: []LsPiece{{Path: "/"}}}, 10, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
-		{AckItem{T: ItemAck, Tasks: [][]byte{id}, Xfer: id, Next: &one, Hold: true}, 11, []uint64{0, 1, 2, 3, 4}},
-		{ChunkItem{T: ItemChunk, Xfer: id, Off: 0, Data: id, Total: &one, SHA256: id, Task: id, Name: "n"}, 12,
-			[]uint64{0, 1, 2, 3, 4, 5, 6, 7}},
-		{ErrItem{T: ItemErr, Code: ErrItemBadMessage, Msg: "m", Item: &item, Task: id}, 13, []uint64{0, 1, 2, 3, 4}},
+			Exit: &code, Ls: []LsPiece{{Path: "/"}}, Ctx: id}, 10, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}},
+		{AckItem{T: ItemAck, Tasks: [][]byte{id}, Xfer: id, Next: &one, Hold: true, Ctx: id}, 11, []uint64{0, 1, 2, 3, 4, 5}},
+		{ChunkItem{T: ItemChunk, Xfer: id, Off: 0, Data: id, Total: &one, SHA256: id, Task: id, Name: "n", Ctx: id}, 12,
+			[]uint64{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+		{ErrItem{T: ItemErr, Code: ErrItemBadMessage, Msg: "m", Item: &item, Task: id, Ctx: id}, 13, []uint64{0, 1, 2, 3, 4, 5}},
 		{ConnUpdateItem{T: ItemConnUpdate, Conn: 2, Reason: "r"}, 14, []uint64{0, 1, 2}},
+		{RehelloItem{T: ItemRehello}, 6, []uint64{0}},
+		{ResumeItem{T: ItemResume, Task: id, Ctx: id}, 15, []uint64{0, 1, 2}},
+		{PollItem{T: ItemPoll, Within: 1000}, 16, []uint64{0, 1}},
 		{FileOffer{Xfer: id, Name: "n", Size: 1, SHA256: id, Stream: true}, -1, []uint64{1, 2, 3, 4, 5}},
 		{LsPiece{ID: 1, Part: 1, Last: true, Path: "/", Sep: "/", Parent: "/", Entries: []LsEntry{entry},
 			Partial: true, Err: ListingErrOther, Owners: []string{"root"}, ErrMsg: "m"}, -1,
@@ -79,7 +82,7 @@ func TestRegistry(t *testing.T) {
 		}
 	}
 	for name, got := range map[string][]int{
-		"err codes":       {ErrItemBadMessage, ErrItemUnknownItem, ErrItemUnknownTask, ErrItemTooLarge, ErrItemSessionClosed, ErrItemSessionReplaced},
+		"err codes":       {ErrItemBadMessage, ErrItemUnknownItem, ErrItemUnknownTask, ErrItemTooLarge, ErrItemSessionClosed, ErrItemSessionReplaced, ErrItemStale},
 		"integrity":       {IntegrityLow, IntegrityMedium, IntegrityHigh, IntegritySystem, IntegrityRoot, IntegrityUser},
 		"entry types":     {EntryDir, EntryFile, EntryLink, EntryOther},
 		"listing errors":  {ListingErrDenied, ListingErrNotFound, ListingErrOther},
@@ -95,6 +98,7 @@ func TestRegistry(t *testing.T) {
 	for got, want := range map[string]string{
 		ItemName(ItemGetTasks): "get_tasks", ItemName(6): "rehello", ItemName(99): "item 99",
 		ErrCodeName(ErrItemSessionClosed): "session_closed", ErrCodeName(0): "code 0",
+		ItemName(ItemPoll): "poll", ErrCodeName(ErrItemStale): "stale",
 		IntegrityName(IntegritySystem): "system", IntegrityName(0): "", IntegrityName(9): "level 9",
 		MachineSourceName(MachineWinMachineGUID): "win-machine-guid", MachineSourceName(42): "source-42",
 		EntryTypeName(EntryLink): "link", EntryTypeName(9): "other",
@@ -273,5 +277,44 @@ func TestArgsWire(t *testing.T) {
 	}
 	if _, err := MarshalCBOR(task); err != nil {
 		t.Fatalf("sent again: %v", err)
+	}
+}
+
+// A poll says a wait of a day at most; an err echoes a ctx of the transfer
+// limit at most; ItemCtx reads the ctx of the items that carry one.
+func TestPollErrCtx(t *testing.T) {
+	if (PollItem{T: ItemPoll, Within: 1000}).Validate() != nil || (PollItem{T: ItemPoll, Within: MaxPollWithin + 1}).Validate() == nil {
+		t.Fatal("poll's within")
+	}
+	id := bytes.Repeat([]byte{1}, 16)
+	if (ErrItem{T: ItemErr, Code: 1, Task: id, Ctx: []byte("x")}).Validate() != nil {
+		t.Fatal("a valid err")
+	}
+	for name, bad := range map[string]ErrItem{
+		"short task": {T: ItemErr, Code: 3, Task: id[:3]},
+		"long ctx":   {T: ItemErr, Code: 1, Ctx: make([]byte, MaxTransferCtx+1)},
+	} {
+		if bad.Validate() == nil {
+			t.Errorf("%s: valid", name)
+		}
+	}
+	next := uint64(4)
+	for _, c := range []struct {
+		v    any
+		want string
+	}{
+		{ChunkItem{T: ItemChunk, Xfer: id, Data: []byte("d"), Ctx: []byte("chunk")}, "chunk"},
+		{AckItem{T: ItemAck, Xfer: id, Next: &next, Ctx: []byte("ack")}, "ack"},
+		{ResultItem{T: ItemResult, Task: id, Ctx: []byte("walk")}, "walk"},
+		{AckItem{T: ItemAck, Xfer: id, Next: &next}, ""},
+		{GetTasksItem{T: ItemGetTasks}, ""},
+	} {
+		b, err := MarshalCBOR(c.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(ItemCtx(b)); got != c.want {
+			t.Errorf("%T: ctx %q, want %q", c.v, got, c.want)
+		}
 	}
 }

@@ -213,6 +213,10 @@ func TestBuildSchemaCommands(t *testing.T) {
 	if _, ok := s.Command("keylog"); ok {
 		t.Error("unknown command found")
 	}
+	shell := BuildCommand{ID: "shell", Kinds: []string{KindReversePersistent}}
+	if !(BuildCommand{ID: "ls"}).OverKind(KindBindCall) || !shell.OverKind(KindReversePersistent) || shell.OverKind(KindReverseCall) {
+		t.Error("OverKind")
+	}
 	if got := (BuildSchema{}).DefaultCommands(exe); got == nil || len(got) != 0 {
 		t.Errorf("no commands: DefaultCommands = %#v, want an empty list", got)
 	}
@@ -231,6 +235,11 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`command "sleep": param "jitter": num must be 1 to 65535`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 0 }},
 		{`command "sleep": param "jitter": num 1 is "interval"'s`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 1 }},
 		{`field "debug": only a command's params have a num`, func(s *BuildSchema) { s.Fields[2].Num = 1 }},
+		{`command "exit": kinds: "sideways" is not a connection kind`, func(s *BuildSchema) { s.Commands[1].Kinds = []string{"sideways"} }},
+		{`command "exit": kinds: duplicate "reverse-call"`, func(s *BuildSchema) { s.Commands[1].Kinds = []string{KindReverseCall, KindReverseCall} }},
+		{`command "exit": kinds: the factory's minions connect through no bind-persistent connection`, func(s *BuildSchema) {
+			s.Commands[1].Kinds = []string{KindBindPersistent}
+		}},
 		{"version must be at least 1", func(s *BuildSchema) { s.Version = 0 }},
 		{"at least one channel", func(s *BuildSchema) { s.Channels = nil }},
 		{`duplicate channel "dns"`, func(s *BuildSchema) { s.Channels = append(s.Channels, s.Channels[1]) }},

@@ -85,10 +85,21 @@ type BuildConnection struct {
 	// Failover is the connection's own failover settings (failover.go);
 	// nil: the build's, and FailoverAuto's default.
 	Failover *ConnectionFailover `json:"failover,omitempty"`
+	// MaxMessage is the largest minion message (CBOR plaintext) the
+	// connection carries each way: its channel's for its kind
+	// (ConnectionKind.MaxMessage), set by core; 0 for MaxMinionMessageSize.
+	// A minion keeps every message it sends through the connection within
+	// it (smaller chunks, listing pieces and result parts), as core keeps
+	// what it sends.
+	MaxMessage int `json:"max_message,omitempty"`
 }
 
 // ConnectionKind is the connection's kind: its endpoint's.
 func (c BuildConnection) ConnectionKind() string { return c.Endpoint.Kind }
+
+// MessageLimit is the largest message the connection carries: MaxMessage,
+// or MaxMinionMessageSize when it says none.
+func (c BuildConnection) MessageLimit() int { return messageLimit(c.MaxMessage) }
 
 // BuildCrypto is the payload crypto a minion is built with. The payload
 // crypto contract defines the material of each suite.
@@ -376,6 +387,9 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 			}
 			ch, _ := s.Channel(e.Channel.ModuleName)
 			checkValues(key+".values.", ch.KindFields(c.ConnectionKind()), c.Values)
+			if err := validMaxMessage(c.MaxMessage); err != nil {
+				add(key+".max_message", "%s", err.Error())
+			}
 			if c.Failover != nil {
 				for k, reason := range c.Failover.Validate() {
 					add(key+".failover."+k, "%s", reason)

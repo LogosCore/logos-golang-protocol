@@ -55,8 +55,7 @@ const (
 	ItemSleepUpdate   = 5
 	// ItemRehello: core asks the minion for a hello (core → minion). A
 	// bind-call minion's first call carries one, under its build id.
-	ItemRehello = 6
-	// 6 is rehello (planned): core asking for a new hello.
+	ItemRehello  = 6
 	ItemGetTasks = 7
 	ItemTask     = 8
 	ItemCancel   = 9
@@ -71,6 +70,11 @@ const (
 	// nothing between messages (a bind-call page) carries a long task (a
 	// walk) across calls this way.
 	ItemResume = 15
+	// ItemPoll: core tells a minion that starts its exchanges to come back
+	// sooner than its schedule, within PollItem.Within (core → minion):
+	// something of its may go on any moment (a stream it holds whose
+	// downloader or uploader is there).
+	ItemPoll = 16
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -79,6 +83,7 @@ var itemNames = map[int]string{
 	ItemHelloResponse: "hello_response", ItemSleepUpdate: "sleep_update", ItemRehello: "rehello",
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
+	ItemPoll: "poll",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -98,13 +103,22 @@ type MinionMessage struct {
 	Items []cbor.RawMessage `cbor:"3,keyasint,omitempty"`
 }
 
-// CoreMessage is a message core → minion.
+// CoreMessage is a message core → minion. At is core's clock when it
+// started the exchange (unix seconds), on every message core starts (with
+// ID): a minion that cannot remember message ids (a bind-call page) refuses
+// one too old, a replay, with ErrItemStale.
 type CoreMessage struct {
 	V     int               `cbor:"0,keyasint"`
 	ID    []byte            `cbor:"1,keyasint,omitempty"`
 	Re    []byte            `cbor:"2,keyasint,omitempty"`
 	Items []cbor.RawMessage `cbor:"3,keyasint,omitempty"`
+	At    uint64            `cbor:"4,keyasint,omitempty"`
 }
+
+// StaleWindow is how far a core message's At may be from a minion's clock
+// before a minion that checks it refuses the message as stale (a replay, or
+// clocks that disagree): the recommendation, the minion's to apply.
+const StaleWindow = 10 * 60 // seconds
 
 // StageItem is a minion's first message: its RSA public key (DER
 // SubjectPublicKeyInfo) and a random correlation id.
@@ -533,6 +547,21 @@ type ErrItem struct {
 	// Task is the task an unknown_task names (16 bytes): core ends a task
 	// its minion does not have, cancelled when it asked to stop it.
 	Task []byte `cbor:"4,keyasint,omitempty"`
+	// Ctx is the ctx of the item it is about (a chunk's, an ack's, a
+	// result's: ItemCtx), echoed: a minion that keeps nothing between
+	// messages finds there what to end or clean up (a partial file).
+	Ctx []byte `cbor:"5,keyasint,omitempty"`
+}
+
+// Validate checks the task id and the ctx.
+func (e ErrItem) Validate() error {
+	switch {
+	case e.Task != nil && len(e.Task) != 16:
+		return errors.New("err: task is 16 bytes")
+	case len(e.Ctx) > MaxTransferCtx:
+		return fmt.Errorf("err: ctx is %d bytes at most", MaxTransferCtx)
+	}
+	return nil
 }
 
 // Error codes of ErrItem.
@@ -549,12 +578,17 @@ const (
 	// ErrItemSessionReplaced: another process claimed the persisted session
 	// the message was sent under. Start over without claiming it.
 	ErrItemSessionReplaced = 6
+	// ErrItemStale: a core message whose at is too far from the minion's
+	// clock (StaleWindow): a replay, or clocks that disagree. msg says the
+	// minion's time. Only a minion that checks at sends it.
+	ErrItemStale = 7
 )
 
 // errCodeNames are the err codes' names, for people.
 var errCodeNames = map[int]string{
 	ErrItemBadMessage: "bad_message", ErrItemUnknownItem: "unknown_item", ErrItemUnknownTask: "unknown_task",
 	ErrItemTooLarge: "too_large", ErrItemSessionClosed: "session_closed", ErrItemSessionReplaced: "session_replaced",
+	ErrItemStale: "stale",
 }
 
 // ErrCodeName is an err code's name, for people: "code 42" for one it does
@@ -564,6 +598,52 @@ func ErrCodeName(code int) string {
 		return n
 	}
 	return fmt.Sprintf("code %d", code)
+}
+
+// PollItem tells a minion that starts its exchanges to send its next
+// message within Within milliseconds, sooner than its schedule would: core
+// expects something of its to go on any moment (ItemPoll). It holds for
+// that one wait; a minion that does not know it keeps its schedule.
+type PollItem struct {
+	T      int    `cbor:"0,keyasint"`
+	Within uint64 `cbor:"1,keyasint"`
+}
+
+// MaxPollWithin is the longest a poll may say: a day.
+const MaxPollWithin = 24 * 60 * 60 * 1000
+
+// Validate checks the wait.
+func (p PollItem) Validate() error {
+	if p.Within > MaxPollWithin {
+		return fmt.Errorf("poll: within is %d ms at most", MaxPollWithin)
+	}
+	return nil
+}
+
+// ItemCtx is the ctx a minion's item carries (a chunk's, an ack's, a
+// result's), nil for none or an item that carries none: what core echoes
+// on an err about it.
+func ItemCtx(item cbor.RawMessage) []byte {
+	var key int
+	switch ItemType(item) {
+	case ItemChunk:
+		key = 8
+	case ItemAck:
+		key = 5
+	case ItemResult:
+		key = 10
+	default:
+		return nil
+	}
+	var m map[int]cbor.RawMessage
+	if cborDec.Unmarshal(item, &m) != nil {
+		return nil
+	}
+	var ctx []byte
+	if raw, ok := m[key]; !ok || cborDec.Unmarshal(raw, &ctx) != nil || len(ctx) > MaxTransferCtx {
+		return nil
+	}
+	return ctx
 }
 
 // StageKeySize is the RSA key size a stage's key must have.

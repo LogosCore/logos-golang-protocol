@@ -196,11 +196,23 @@ type BuildCommand struct {
 	// actions (ActionListDir), which says the params it gives and the
 	// result it needs; empty: core never runs it on its own.
 	Action string `json:"action,omitempty"`
+	// Kinds narrows the command to sessions whose minion uses a connection
+	// of these kinds (KindReversePersistent, ...); empty: every kind. For a
+	// command that does not work, or not well, over the others (an
+	// interactive shell needs a connection either side can speak on at
+	// once): core refuses a task of it on a session on another kind.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // For reports whether a build of target id can have the command.
 func (c BuildCommand) For(id string) bool {
 	return len(c.Targets) == 0 || slices.Contains(c.Targets, id)
+}
+
+// OverKind reports whether a task of the command can go to a minion on a
+// connection of kind.
+func (c BuildCommand) OverKind(kind string) bool {
+	return len(c.Kinds) == 0 || slices.Contains(c.Kinds, kind)
 }
 
 // Target returns the target with id, if declared.
@@ -397,9 +409,20 @@ func ValidateBuildSchema(s BuildSchema) error {
 	}
 	commands := make(map[string]bool, len(s.Commands))
 	ops := make(map[int]string, len(s.Commands))
+	declared := map[string]bool{}
+	for _, c := range s.Channels {
+		for _, k := range c.KindNames() {
+			declared[k] = true
+		}
+	}
 	for _, c := range s.Commands {
 		if err := validateBuildCommand(c, ids); err != nil {
 			return fmt.Errorf("command %q: %w", c.ID, err)
+		}
+		for _, k := range c.Kinds {
+			if !declared[k] {
+				return fmt.Errorf("command %q: kinds: the factory's minions connect through no %s connection", c.ID, k)
+			}
 		}
 		if commands[c.ID] {
 			return fmt.Errorf("duplicate command %q", c.ID)
@@ -477,6 +500,14 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 		}
 		if slices.Contains(c.Targets[:i], t) {
 			return fmt.Errorf("duplicate target %q", t)
+		}
+	}
+	for i, k := range c.Kinds {
+		if !KnownKind(k) {
+			return fmt.Errorf("kinds: %q is not a connection kind", k)
+		}
+		if slices.Contains(c.Kinds[:i], k) {
+			return fmt.Errorf("kinds: duplicate %q", k)
 		}
 	}
 	if len(c.Params) > MaxCommandParams {

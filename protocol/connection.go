@@ -49,10 +49,42 @@ type ConnectionSchema struct {
 
 // ConnectionKind is what a connection of one kind is given: Fields, built
 // into a minion (and kept as an endpoint), and, for a bind kind, Target,
-// what operators fill in for each target.
+// what operators fill in for each target. MaxMessage is the largest minion
+// message (its CBOR plaintext, before sealing) the channel carries each way
+// on a connection of the kind, MinConnectionMessage to MaxMinionMessageSize;
+// 0: MaxMinionMessageSize. A channel whose transport carries little (a DNS
+// query) says so here: core keeps what it sends within it, and the build
+// gives it to the minion (BuildConnection.MaxMessage).
 type ConnectionKind struct {
-	Fields []FieldSpec `json:"fields"`
-	Target []FieldSpec `json:"target,omitempty"`
+	Fields     []FieldSpec `json:"fields"`
+	Target     []FieldSpec `json:"target,omitempty"`
+	MaxMessage int         `json:"max_message,omitempty"`
+}
+
+// MinConnectionMessage is the least a connection kind may say it carries:
+// a stage (an RSA-2048 public key) or a hello, with room to spare.
+const MinConnectionMessage = 1 << 10
+
+// MessageLimit is the largest message a connection of kind carries:
+// MaxMinionMessageSize unless the kind says less.
+func (s ConnectionSchema) MessageLimit(kind string) int {
+	return messageLimit(s.Kinds[kind].MaxMessage)
+}
+
+func messageLimit(n int) int {
+	if n <= 0 || n > MaxMinionMessageSize {
+		return MaxMinionMessageSize
+	}
+	return n
+}
+
+// validMaxMessage checks a declared message limit: 0 (none) or
+// MinConnectionMessage to MaxMinionMessageSize.
+func validMaxMessage(n int) error {
+	if n != 0 && (n < MinConnectionMessage || n > MaxMinionMessageSize) {
+		return fmt.Errorf("max_message must be %d to %d bytes", MinConnectionMessage, MaxMinionMessageSize)
+	}
+	return nil
 }
 
 // knownKinds are the connection kinds, in the order kinds are listed.
@@ -115,6 +147,9 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			return fmt.Errorf("kinds.%s: at least one field", kind)
 		case len(k.Fields) > MaxConnectionFields || len(k.Target) > MaxConnectionFields:
 			return fmt.Errorf("kinds.%s: too many fields (%d at most)", kind, MaxConnectionFields)
+		}
+		if err := validMaxMessage(k.MaxMessage); err != nil {
+			return fmt.Errorf("kinds.%s: %w", kind, err)
 		}
 		keys := map[string]bool{}
 		for _, f := range append(slices.Clone(k.Fields), k.Target...) {

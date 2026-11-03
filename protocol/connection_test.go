@@ -35,6 +35,16 @@ func TestValidateConnectionSchema(t *testing.T) {
 	if got := s.KindFields(KindReversePersistent); len(got) != 5 || got[4].Key != "ws_backoff" {
 		t.Fatalf("fields %v", got)
 	}
+	if s.MessageLimit(KindReverseCall) != MaxMinionMessageSize {
+		t.Fatal("no max_message: the protocol's limit")
+	}
+	small := validConnection()
+	k := small.Kinds[KindReverseCall]
+	k.MaxMessage = 4096
+	small.Kinds[KindReverseCall] = k
+	if err := ValidateConnectionSchema(small); err != nil || small.MessageLimit(KindReverseCall) != 4096 {
+		t.Fatalf("a kind that carries little: %v %d", err, small.MessageLimit(KindReverseCall))
+	}
 	cases := map[string]func(*ConnectionSchema){
 		"unsupported connection schema_version": func(s *ConnectionSchema) { s.SchemaVersion = "1" },
 		"version must be":                       func(s *ConnectionSchema) { s.Version = 0 },
@@ -53,6 +63,11 @@ func TestValidateConnectionSchema(t *testing.T) {
 			k := s.Kinds[KindReverseCall]
 			k.Fields = slices.Clone(k.Fields)
 			k.Fields[2].Default = "10s"
+			s.Kinds[KindReverseCall] = k
+		},
+		"max_message must be": func(s *ConnectionSchema) {
+			k := s.Kinds[KindReverseCall]
+			k.MaxMessage = 512
 			s.Kinds[KindReverseCall] = k
 		},
 		"key must match": func(s *ConnectionSchema) {
