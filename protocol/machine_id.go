@@ -31,6 +31,11 @@ import (
 // MachineDomainSID is not recommended (it asks LSA or a domain controller);
 // its number stays.
 //
+// MachineSSHHostKey is for a server an agentless SSH channel reaches, when
+// the server's own machine id cannot be read: the SHA-256 of its host key
+// (the key's SSH wire form), in hex. It identifies the server before any
+// login, and reading it runs nothing.
+//
 // On the wire a hello says the source by its number (HelloItem.MachineSource)
 // and the value apart; core keeps them joined, by the source's name.
 const (
@@ -44,6 +49,7 @@ const (
 	MachineHostname       = 8
 	MachineKept           = 9
 	MachineEphemeral      = 10
+	MachineSSHHostKey     = 11
 )
 
 // machineSourceNames are the sources' names, as core keeps them.
@@ -51,6 +57,7 @@ var machineSourceNames = map[int]string{
 	MachineSMBIOSUUID: "smbios-uuid", MachineMacUUID: "mac-platform-uuid", MachineBSDHostUUID: "bsd-host-uuid",
 	MachineLinuxMachineID: "linux-machine-id", MachineWinMachineGUID: "win-machine-guid", MachineContainer: "container",
 	MachineDomainSID: "domain-sid", MachineHostname: "hostname", MachineKept: "kept", MachineEphemeral: "ephemeral",
+	MachineSSHHostKey: "ssh-host-key",
 }
 
 // MachineSourceName is a source's name: "source-42" for one this version

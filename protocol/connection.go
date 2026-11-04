@@ -55,10 +55,18 @@ type ConnectionSchema struct {
 // 0: MaxMinionMessageSize. A channel whose transport carries little (a DNS
 // query) says so here: core keeps what it sends within it, and the build
 // gives it to the minion (BuildConnection.MaxMessage).
+//
+// Agentless, for a bind kind only, says the channel acts as the minion on
+// connections of the kind: no minion runs on the target, and the channel
+// reads and writes the messages it carries there (docs:
+// contracts/agentless-channels/). Only such a kind carries the unsealed
+// messages of a CryptoNone build. The channel's code says it, never an
+// operator or a factory: it is what the channel does.
 type ConnectionKind struct {
 	Fields     []FieldSpec `json:"fields"`
 	Target     []FieldSpec `json:"target,omitempty"`
 	MaxMessage int         `json:"max_message,omitempty"`
+	Agentless  bool        `json:"agentless,omitempty"`
 }
 
 // MinConnectionMessage is the least a connection kind may say it carries:
@@ -116,14 +124,20 @@ func (s ConnectionSchema) TargetFields(kind string) []FieldSpec {
 	return s.Kinds[kind].Target
 }
 
+// IsAgentless reports whether the channel acts as the minion on connections
+// of kind (ConnectionKind.Agentless); false for a kind it does not carry.
+func (s ConnectionSchema) IsAgentless(kind string) bool {
+	return s.Kinds[kind].Agentless
+}
+
 // IsBindKind reports whether kind is one the channel dials (bind-call,
 // bind-persistent): its minions have targets.
 func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindBindPersistent }
 
 // ValidateConnectionSchema checks a schema's structure, limits, and that every
 // declared default satisfies its own field spec: at least one kind, each a
-// known kind with its fields (and, for a bind kind only, its target), keys
-// unique within the kind.
+// known kind with its fields (and, for a bind kind only, its target and
+// agentless), keys unique within the kind.
 func ValidateConnectionSchema(s ConnectionSchema) error {
 	if s.SchemaVersion != ConnectionSchemaV2 {
 		return fmt.Errorf("unsupported connection schema_version %q", s.SchemaVersion)
@@ -143,6 +157,8 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 		switch {
 		case len(k.Target) > 0 && !bind:
 			return fmt.Errorf("kinds.%s: only a bind kind has target fields", kind)
+		case k.Agentless && !bind:
+			return fmt.Errorf("kinds.%s: only a bind kind is agentless", kind)
 		case len(k.Fields) == 0 && len(k.Target) == 0:
 			return fmt.Errorf("kinds.%s: at least one field", kind)
 		case len(k.Fields) > MaxConnectionFields || len(k.Target) > MaxConnectionFields:

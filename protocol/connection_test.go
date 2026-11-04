@@ -45,10 +45,23 @@ func TestValidateConnectionSchema(t *testing.T) {
 	if err := ValidateConnectionSchema(small); err != nil || small.MessageLimit(KindReverseCall) != 4096 {
 		t.Fatalf("a kind that carries little: %v %d", err, small.MessageLimit(KindReverseCall))
 	}
+	agentless := validConnection()
+	b := agentless.Kinds[KindBindCall]
+	b.Agentless = true
+	agentless.Kinds[KindBindCall] = b
+	if err := ValidateConnectionSchema(agentless); err != nil || !agentless.IsAgentless(KindBindCall) ||
+		agentless.IsAgentless(KindReverseCall) || agentless.IsAgentless(KindBindPersistent) {
+		t.Fatalf("an agentless bind kind: %v", err)
+	}
 	cases := map[string]func(*ConnectionSchema){
 		"unsupported connection schema_version": func(s *ConnectionSchema) { s.SchemaVersion = "1" },
-		"version must be":                       func(s *ConnectionSchema) { s.Version = 0 },
-		"at least one":                          func(s *ConnectionSchema) { s.Kinds = nil },
+		"only a bind kind is agentless": func(s *ConnectionSchema) {
+			k := s.Kinds[KindReverseCall]
+			k.Agentless = true
+			s.Kinds[KindReverseCall] = k
+		},
+		"version must be": func(s *ConnectionSchema) { s.Version = 0 },
+		"at least one":    func(s *ConnectionSchema) { s.Kinds = nil },
 		"not a connection kind": func(s *ConnectionSchema) {
 			s.Kinds["sideways"] = ConnectionKind{Fields: s.Kinds[KindReverseCall].Fields}
 		},

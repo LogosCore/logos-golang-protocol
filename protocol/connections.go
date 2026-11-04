@@ -35,8 +35,8 @@ const (
 )
 
 // ConnFrame is one binary frame of a connection socket, either way: a minion
-// message's sealed frame and the id it is sent under (build id, temporary
-// id or session id, 16 raw bytes).
+// message's sealed frame (a CryptoNone build's message itself) and the id it
+// is sent under (build id, temporary id or session id, 16 raw bytes).
 type ConnFrame struct {
 	ID   []byte `cbor:"1,keyasint"`
 	Data []byte `cbor:"2,keyasint"`

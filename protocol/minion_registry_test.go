@@ -86,7 +86,7 @@ func TestRegistry(t *testing.T) {
 		"integrity":       {IntegrityLow, IntegrityMedium, IntegrityHigh, IntegritySystem, IntegrityRoot, IntegrityUser},
 		"entry types":     {EntryDir, EntryFile, EntryLink, EntryOther},
 		"listing errors":  {ListingErrDenied, ListingErrNotFound, ListingErrOther},
-		"machine sources": {MachineSMBIOSUUID, MachineMacUUID, MachineBSDHostUUID, MachineLinuxMachineID, MachineWinMachineGUID, MachineContainer, MachineDomainSID, MachineHostname, MachineKept, MachineEphemeral},
+		"machine sources": {MachineSMBIOSUUID, MachineMacUUID, MachineBSDHostUUID, MachineLinuxMachineID, MachineWinMachineGUID, MachineContainer, MachineDomainSID, MachineHostname, MachineKept, MachineEphemeral, MachineSSHHostKey},
 	} {
 		for i, n := range got {
 			if n != i+1 {
@@ -101,7 +101,9 @@ func TestRegistry(t *testing.T) {
 		ItemName(ItemPoll): "poll", ErrCodeName(ErrItemStale): "stale",
 		IntegrityName(IntegritySystem): "system", IntegrityName(0): "", IntegrityName(9): "level 9",
 		MachineSourceName(MachineWinMachineGUID): "win-machine-guid", MachineSourceName(42): "source-42",
-		EntryTypeName(EntryLink): "link", EntryTypeName(9): "other",
+		MachineSourceName(MachineSSHHostKey): "ssh-host-key", LinkFailName(LinkFailLogin): "login",
+		LinkFailName(LinkFailHostKey): "host_key",
+		EntryTypeName(EntryLink):      "link", EntryTypeName(9): "other",
 	} {
 		if got != want {
 			t.Errorf("name %q, want %q", got, want)

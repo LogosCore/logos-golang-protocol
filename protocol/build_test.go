@@ -316,6 +316,23 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 	}
 }
 
+func TestBuildSchemaCryptoNone(t *testing.T) {
+	s := BuildSchema{
+		SchemaVersion: BuildSchemaV3, Version: 1, Crypto: CryptoNone,
+		Channels: []BuildChannel{{ModuleName: "ssh", Versions: []int{1},
+			Kinds: []BuildKind{{Kind: KindBindCall}, {Kind: KindBindPersistent}}}},
+		Targets: []BuildTarget{{ID: "ssh", Label: "SSH server", Format: "json", Platforms: []string{"any/any"}}},
+	}
+	if err := ValidateBuildSchema(s); err != nil {
+		t.Fatalf("none through bind kinds: %v", err)
+	}
+	s.Channels = append(s.Channels, BuildChannel{ModuleName: "http", Versions: []int{3}, Kinds: []BuildKind{{Kind: KindReverseCall}}})
+	want := `crypto none: channel "http" kind reverse-call: only a bind kind can be agentless`
+	if err := ValidateBuildSchema(s); err == nil || err.Error() != want {
+		t.Fatalf("none through a reverse kind: %v", err)
+	}
+}
+
 func TestBuildTargetFieldLimit(t *testing.T) {
 	s := exampleBuildSchema(t)
 	for i := 0; len(s.Fields)+len(s.Targets[1].Fields) <= MaxBuildTargetFields; i++ {

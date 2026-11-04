@@ -145,7 +145,8 @@ type BuildRequest struct {
 	Failover *BuildFailover `json:"failover,omitempty"`
 	// Files are the files that values name, by id.
 	Files map[string]BuildFile `json:"files,omitempty"`
-	// Crypto is set when the factory declares a crypto suite.
+	// Crypto is set when the factory declares a crypto suite. For
+	// CryptoNone it names the suite alone: there are no keys.
 	Crypto *BuildCrypto `json:"crypto,omitempty"`
 	// SessionID is the persisted session the minion claims in its hello, a
 	// lowercase UUID; set only for a factory that declares
@@ -423,6 +424,8 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		add("crypto", "required: the factory declares a crypto suite")
 	case r.Crypto != nil && r.Crypto.Suite != s.Crypto:
 		add("crypto", "suite %q is not the factory's %q", r.Crypto.Suite, s.Crypto)
+	case r.Crypto != nil && r.Crypto.Suite == CryptoNone && len(r.Crypto.Material) > 0 && string(r.Crypto.Material) != "null":
+		add("crypto.material", "suite %s has no keys", CryptoNone)
 	}
 
 	if !isAbsoluteURL(r.Artifact.UploadURL) {

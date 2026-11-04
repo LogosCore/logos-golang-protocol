@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -167,6 +168,20 @@ func TestHello(t *testing.T) {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v passed", bad)
 		}
+		// The same checks for a minion an agentless channel acts as, but
+		// for the pid.
+		if bad.PID != 0 && bad.ValidateAgentless() == nil {
+			t.Fatalf("%+v passed as agentless", bad)
+		}
+	}
+	// An agentless minion has no process: pid 0 is taken.
+	agentless := HelloItem{T: ItemHello, OS: "linux", Arch: "amd64", Host: "server01", MachineSource: MachineSSHHostKey,
+		MachineValue: strings.Repeat("ab", 32)}
+	if err := agentless.ValidateAgentless(); err != nil {
+		t.Fatalf("agentless hello: %v", err)
+	}
+	if agentless.Validate() == nil {
+		t.Fatal("a pid 0 passed Validate")
 	}
 }
 
@@ -401,5 +416,30 @@ func TestConnUpdate(t *testing.T) {
 	}
 	if ItemName(ItemConnUpdate) != "conn_update" {
 		t.Error(ItemName(ItemConnUpdate))
+	}
+}
+
+// Under a build id a minion says one stage or one hello, alone.
+func TestValidateBuildMessage(t *testing.T) {
+	item := func(v any) cbor.RawMessage {
+		b, err := MarshalCBOR(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	hello := item(HelloItem{T: ItemHello, PID: 1, OS: "linux", Arch: "amd64"})
+	stage := item(StageItem{T: ItemStage, Key: []byte("k"), Corr: make([]byte, 16)})
+	max := uint64(4)
+	gets := item(GetTasksItem{T: ItemGetTasks, Max: &max})
+	for _, ok := range [][]cbor.RawMessage{{hello}, {stage}} {
+		if err := ValidateBuildMessage(ok); err != nil {
+			t.Errorf("%d: %v", ItemType(ok[0]), err)
+		}
+	}
+	for name, bad := range map[string][]cbor.RawMessage{"none": nil, "hello and get_tasks": {hello, gets}, "get_tasks": {gets}, "two hellos": {hello, hello}} {
+		if ValidateBuildMessage(bad) == nil {
+			t.Errorf("%s: taken", name)
+		}
 	}
 }

@@ -61,6 +61,12 @@ func TestLinkFrameRefused(t *testing.T) {
 	if _, err := DecodeLinkFrame([]byte{0xff}); err == nil {
 		t.Error("garbage decoded")
 	}
+	// An agentless channel's refusals are failures of their own kinds.
+	for _, kind := range []int{LinkFailLogin, LinkFailHostKey} {
+		if _, err := EncodeLinkFrame(LinkFrame{Type: LinkAnswer, Request: 1, Failure: &LinkFailure{Kind: kind, Msg: "refused"}}); err != nil {
+			t.Errorf("failure kind %d: %v", kind, err)
+		}
+	}
 }
 
 func TestExcerpt(t *testing.T) {

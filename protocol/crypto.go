@@ -5,6 +5,16 @@ package protocol
 // core generates a minion's keys for it and sends them in the build request
 // (BuildRequest.Crypto).
 
+// CryptoNone is no payload crypto: a minion and core exchange messages
+// unsealed, the message's CBOR where a sealed frame goes, under its id as
+// ever (docs: contracts/agentless-channels/). It is only for a minion that
+// its channel acts as (ConnectionKind.Agentless): between core and such a
+// channel there is nothing to hide from the channel, and the link a message
+// comes over shows who sent it. A factory declares it explicitly; a schema
+// without a suite stays one whose minions core cannot open. It has no keys:
+// a build request's Crypto names the suite alone, and there is no staging.
+const CryptoNone = "none"
+
 // CryptoAES256CBCHMACSHA256 is AES-256-CBC with an HMAC-SHA256 tag
 // (encrypt-then-MAC). Its material is AES256CBCHMACSHA256Material.
 const CryptoAES256CBCHMACSHA256 = "aes-256-cbc-hmac-sha256"

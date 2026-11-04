@@ -12,7 +12,9 @@ import (
 // opens to core, over which core asks the channel to reach bind minions.
 // Core sends a call; the channel delivers the sealed message to the target
 // and answers with what came back, by the request's id. Each binary frame is
-// one LinkFrame.
+// one LinkFrame. On an agentless kind (ConnectionKind.Agentless) the channel
+// is the minion: it answers the message itself, and for a CryptoNone build
+// the message travels unsealed.
 
 // LinkPath is core's endpoint for the control link, under core's base URL:
 // a WebSocket handshake with HeaderChannelInstance.
@@ -24,7 +26,8 @@ const (
 	// Values say, and answer with what came back.
 	LinkCall = 1
 	// LinkOpen (core → channel): open a bind-persistent connection to the
-	// target Values say. Not built yet: a channel answers it with a
+	// target Values say: the channel dials, then opens the connection's
+	// socket naming the request (HeaderOpenRequest), or answers with a
 	// failure.
 	LinkOpen = 2
 	// LinkAnswer (channel → core): the answer to request Request.
@@ -42,10 +45,20 @@ const (
 	// LinkFailOther: anything else (the target's values do not make a
 	// request, a proxy failed, the channel draining).
 	LinkFailOther = 4
+	// LinkFailLogin: the target refused the login the channel was given
+	// (an agentless channel's: ConnectionKind.Agentless); the message says
+	// why, and what the target offers. Retrying changes nothing until the
+	// target is edited.
+	LinkFailLogin = 5
+	// LinkFailHostKey: the target is not the one the target's values say
+	// (an agentless channel's: its host key, or its certificate, is not
+	// the one given); the message says what it presented.
+	LinkFailHostKey = 6
 )
 
 var linkFailNames = map[int]string{
 	LinkFailUnreachable: "unreachable", LinkFailTimeout: "timeout", LinkFailTLS: "tls", LinkFailOther: "other",
+	LinkFailLogin: "login", LinkFailHostKey: "host_key",
 }
 
 // LinkFailName is a failure kind's name, for people.
@@ -72,9 +85,9 @@ const (
 //
 // A call carries Request, Values (the build connection's built-in values
 // and the target's, by the keys the channel declared for the kind), ID (the
-// id the message is sent under, 16 bytes), Data (the sealed message) and
-// Deadline (milliseconds, optional: the channel keeps to the shorter of it
-// and its own timeout).
+// id the message is sent under, 16 bytes), Data (the sealed message, or a
+// CryptoNone build's message itself) and Deadline (milliseconds, optional:
+// the channel keeps to the shorter of it and its own timeout).
 //
 // An answer carries Request and one of:
 //   - ID and Data: what came back was a minion message in the channel's

@@ -97,6 +97,10 @@ const (
 	// its place from 1 (a command's param: switch_connection's conn). The UI
 	// offers the session's connections by name, kind and address.
 	FormatConnection = "connection"
+	// FormatMultiline is a string or a secret over several lines, a PEM
+	// key say: the UI edits it in a box of several lines, its line breaks
+	// kept.
+	FormatMultiline = "multiline"
 )
 
 // FieldSpec describes a typed value plus its constraints and UI hints. It is
@@ -117,8 +121,8 @@ type FieldSpec struct {
 	Order       int       `json:"order,omitempty"`
 	Unit        string    `json:"unit,omitempty"`
 	Placeholder string    `json:"placeholder,omitempty"`
-	// Format is what a string or int field holds (FormatUserAgent, ...): a
-	// UI hint, never validated. Unknown formats are ignored.
+	// Format is what a string, secret or int field holds (FormatUserAgent,
+	// ...): a UI hint, never validated. Unknown formats are ignored.
 	Format     string       `json:"format,omitempty"`
 	Required   bool         `json:"required,omitempty"`
 	Default    any          `json:"default,omitempty"`
@@ -428,8 +432,8 @@ func checkFieldSpec(f FieldSpec, allowFile bool) error {
 	if err := validateText(f.Label, f.Description); err != nil {
 		return err
 	}
-	if f.Format != "" && ((f.Type != FieldString && f.Type != FieldInt) || !keyPattern.MatchString(f.Format)) {
-		return fmt.Errorf("format is a lowercase name, only for string and int")
+	if f.Format != "" && ((f.Type != FieldString && f.Type != FieldSecret && f.Type != FieldInt) || !keyPattern.MatchString(f.Format)) {
+		return fmt.Errorf("format is a lowercase name, only for string, secret and int")
 	}
 	if (f.Type == FieldEnum || f.Type == FieldEnumList) && (len(f.Options) == 0 || len(f.Options) > MaxEnumOptions) {
 		return fmt.Errorf("%s needs 1..%d options", f.Type, MaxEnumOptions)

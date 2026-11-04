@@ -149,7 +149,9 @@ type StageResponseItem struct {
 // HelloItem is the minion's host and process: it opens a session, and
 // under a session id it replaces what the session recorded (a rehello).
 // PID, OS and Arch are required; OS and Arch use Go's names, as build
-// platforms do. X holds the factory's own fields.
+// platforms do. A minion an agentless channel acts as has no process of
+// its own: its PID is 0 (ValidateAgentless). X holds the factory's own
+// fields.
 type HelloItem struct {
 	T      int    `cbor:"0,keyasint"`
 	PID    uint64 `cbor:"1,keyasint"`
@@ -298,9 +300,17 @@ func (h HelloItem) AddrStrings() []string {
 // integrity level or machine source this version does not know is taken:
 // core shows its number.
 func (h HelloItem) Validate() error {
-	switch {
-	case h.PID == 0:
+	if h.PID == 0 {
 		return errors.New("hello: pid is required")
+	}
+	return h.ValidateAgentless()
+}
+
+// ValidateAgentless is Validate for the hello of a minion an agentless
+// channel acts as (its messages unsealed: CryptoNone): no process runs for
+// it on the target, so a PID of 0 is taken, meaning none.
+func (h HelloItem) ValidateAgentless() error {
+	switch {
 	case h.OS == "":
 		return errors.New("hello: os is required")
 	case h.Arch == "":
@@ -723,6 +733,18 @@ func NewMessageID() []byte {
 	id := make([]byte, 16)
 	_, _ = rand.Read(id)
 	return id
+}
+
+// ValidateBuildMessage checks a minion's message under its build id, which
+// it sends before it has a session: one stage, or one hello, alone. Core
+// takes nothing else there; the rest goes under the session id the
+// hello_response gives (a minion answering a rehello under the build id
+// says its hello alone too).
+func ValidateBuildMessage(items []cbor.RawMessage) error {
+	if len(items) == 1 && (ItemType(items[0]) == ItemStage || ItemType(items[0]) == ItemHello) {
+		return nil
+	}
+	return errors.New("under a build id the only item taken is one stage or one hello")
 }
 
 // ValidateMessageHead checks what every message has: v, exactly one of id

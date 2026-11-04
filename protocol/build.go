@@ -72,7 +72,8 @@ type BuildSchema struct {
 	Channels []BuildChannel `json:"channels"`
 	// Crypto is the payload crypto suite the minions implement; core
 	// generates the keys for it. Optional; core refuses a registration whose
-	// suite it does not implement.
+	// suite it does not implement. CryptoNone is for minions an agentless
+	// channel acts as: every channel kind it lists is a bind kind.
 	Crypto string `json:"crypto,omitempty"`
 	// Fields are the build parameters every target shares.
 	Fields  []FieldSpec   `json:"fields,omitempty"`
@@ -384,6 +385,18 @@ func ValidateBuildSchema(s BuildSchema) error {
 
 	if s.Crypto != "" && !cryptoSuitePattern.MatchString(s.Crypto) {
 		return fmt.Errorf("crypto suite %q must match %s", s.Crypto, cryptoSuitePattern)
+	}
+	if s.Crypto == CryptoNone {
+		// Only a channel that acts as the minion carries unsealed messages,
+		// and only on a kind it dials: a reverse kind's messages come from
+		// whoever reaches the channel.
+		for _, c := range s.Channels {
+			for _, k := range c.Kinds {
+				if !IsBindKind(k.Kind) {
+					return fmt.Errorf("crypto %s: channel %q kind %s: only a bind kind can be agentless", CryptoNone, c.ModuleName, k.Kind)
+				}
+			}
+		}
 	}
 
 	if len(s.Fields) > MaxBuildTargetFields {
