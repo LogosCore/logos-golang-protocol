@@ -58,6 +58,7 @@ func TestRegistry(t *testing.T) {
 		{RehelloItem{T: ItemRehello}, 6, []uint64{0}},
 		{ResumeItem{T: ItemResume, Task: id, Ctx: id}, 15, []uint64{0, 1, 2}},
 		{PollItem{T: ItemPoll, Within: 1000}, 16, []uint64{0, 1}},
+		{ReackItem{T: ItemReack, Tasks: [][]byte{id}}, 19, []uint64{0, 1}},
 		{FileOffer{Xfer: id, Name: "n", Size: 1, SHA256: id, Stream: true}, -1, []uint64{1, 2, 3, 4, 5}},
 		{LsPiece{ID: 1, Part: 1, Last: true, Path: "/", Sep: "/", Parent: "/", Entries: []LsEntry{entry},
 			Partial: true, Err: ListingErrOther, Owners: []string{"root"}, ErrMsg: "m"}, -1,

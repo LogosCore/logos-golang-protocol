@@ -82,6 +82,11 @@ const (
 	// ItemFeedback: a warning or an error of the minion's, for its
 	// operators (FeedbackItem; minion → core).
 	ItemFeedback = 18
+	// ItemReack: core asks the minion which of the tasks it names it still
+	// has (ReackItem; core → minion): once the minion is back over a new
+	// connection that may not be the one its tasks ran over, or as a new
+	// process (a claim).
+	ItemReack = 19
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -90,7 +95,7 @@ var itemNames = map[int]string{
 	ItemHelloResponse: "hello_response", ItemSleepUpdate: "sleep_update", ItemRehello: "rehello",
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
-	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback",
+	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -449,6 +454,35 @@ type ResumeItem struct {
 	Ctx  []byte `cbor:"2,keyasint"`
 }
 
+// ReackItem asks the minion which of Tasks it still has (core → minion),
+// as far as core knows tasks it runs: one whose process restarted has none
+// of its earlier ones, and a channel acting as the minion loses those that
+// ran inside a connection that went. The minion answers in its next
+// message: an ack naming those it has (running, or ended with an end core
+// has not had), and an err unknown_task naming each it does not, which
+// core ends. One that does not take the item answers unknown_item, and core
+// knows no more than before.
+type ReackItem struct {
+	T     int      `cbor:"0,keyasint"`
+	Tasks [][]byte `cbor:"1,keyasint"`
+}
+
+// MaxReackTasks bounds a reack's tasks.
+const MaxReackTasks = 256
+
+// Validate checks the tasks: 1 to MaxReackTasks ids of 16 bytes.
+func (r ReackItem) Validate() error {
+	if len(r.Tasks) == 0 || len(r.Tasks) > MaxReackTasks {
+		return fmt.Errorf("reack: 1 to %d tasks", MaxReackTasks)
+	}
+	for _, t := range r.Tasks {
+		if len(t) != 16 {
+			return errors.New("reack: a task is 16 bytes")
+		}
+	}
+	return nil
+}
+
 // Validate checks the task id and the ctx.
 func (r ResumeItem) Validate() error {
 	switch {
@@ -581,8 +615,8 @@ func (e ErrItem) Validate() error {
 const (
 	ErrItemBadMessage  = 1
 	ErrItemUnknownItem = 2
-	// ErrItemUnknownTask: a cancel (or chunk) for a task the minion does not
-	// have.
+	// ErrItemUnknownTask: a cancel, a reack (or a chunk) for a task the
+	// minion does not have.
 	ErrItemUnknownTask = 3
 	ErrItemTooLarge    = 4
 	// ErrItemSessionClosed: the session the message was sent under is

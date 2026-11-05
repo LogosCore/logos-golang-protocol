@@ -62,8 +62,22 @@ func TestValidateConnectionSchema(t *testing.T) {
 		validConnection().CallLimit(KindBindCall) != 0 || slow.CallLimit(KindReverseCall) != 0 {
 		t.Fatalf("a bind-call kind's call limit: %v %s", err, slow.CallLimit(KindBindCall))
 	}
+	listening := validConnection()
+	listening.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Type: FieldInt}}, MaxOpen: "2m"}
+	if err := ValidateConnectionSchema(listening); err != nil || listening.OpenLimit(KindBindPersistent) != 2*time.Minute ||
+		validConnection().OpenLimit(KindBindPersistent) != 0 || listening.OpenLimit(KindBindCall) != 0 {
+		t.Fatalf("a bind-persistent kind's open limit: %v %s", err, listening.OpenLimit(KindBindPersistent))
+	}
 	cases := map[string]func(*ConnectionSchema){
 		"unsupported connection schema_version": func(s *ConnectionSchema) { s.SchemaVersion = "1" },
+		"only a bind-persistent kind says max_open": func(s *ConnectionSchema) {
+			k := s.Kinds[KindBindCall]
+			k.MaxOpen = "1m"
+			s.Kinds[KindBindCall] = k
+		},
+		"max_open must be a duration": func(s *ConnectionSchema) {
+			s.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Type: FieldInt}}, MaxOpen: "soon"}
+		},
 		"only a bind-call kind says max_call": func(s *ConnectionSchema) {
 			k := s.Kinds[KindReverseCall]
 			k.MaxCall = "1m"

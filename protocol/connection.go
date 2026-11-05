@@ -72,18 +72,28 @@ type ConnectionSchema struct {
 // for less. Empty: core's own. Core keeps each call within the shorter of
 // it and its own limit, and says the result as the call's deadline
 // (LinkFrame.Deadline).
+//
+// MaxOpen, for bind-persistent only, is the same for an open: how long the
+// channel may take to open a connection of the kind (a dial, a login), as
+// a duration, MinOpenLimit to MaxOpenLimit. Core waits as long again for
+// the minion's first word once the connection's socket is up. Empty:
+// core's own. Core keeps each open within the shorter of it and its own
+// limit, and says the result as the open's deadline (LinkFrame.Deadline).
 type ConnectionKind struct {
 	Fields     []FieldSpec `json:"fields"`
 	Target     []FieldSpec `json:"target,omitempty"`
 	MaxMessage int         `json:"max_message,omitempty"`
 	Agentless  bool        `json:"agentless,omitempty"`
 	MaxCall    string      `json:"max_call,omitempty"`
+	MaxOpen    string      `json:"max_open,omitempty"`
 }
 
-// The bounds of a kind's MaxCall.
+// The bounds of a kind's MaxCall and MaxOpen.
 const (
 	MinCallLimit = time.Second
 	MaxCallLimit = time.Hour
+	MinOpenLimit = time.Second
+	MaxOpenLimit = time.Hour
 )
 
 // CallLimit is how long a call of kind may take, as the kind says
@@ -93,14 +103,32 @@ func (s ConnectionSchema) CallLimit(kind string) time.Duration {
 	return d
 }
 
+// OpenLimit is how long an open of kind may take, as the kind says
+// (MaxOpen); 0 when it says none, or for a kind the channel does not carry.
+func (s ConnectionSchema) OpenLimit(kind string) time.Duration {
+	d, _ := openLimit(s.Kinds[kind].MaxOpen)
+	return d
+}
+
 // callLimit reads a declared MaxCall: 0 for none.
 func callLimit(v string) (time.Duration, error) {
+	return durationLimit("max_call", v, MinCallLimit, MaxCallLimit)
+}
+
+// openLimit reads a declared MaxOpen: 0 for none.
+func openLimit(v string) (time.Duration, error) {
+	return durationLimit("max_open", v, MinOpenLimit, MaxOpenLimit)
+}
+
+// durationLimit reads a kind's declared limit called name, lo to hi: 0 for
+// none.
+func durationLimit(name, v string, lo, hi time.Duration) (time.Duration, error) {
 	if v == "" {
 		return 0, nil
 	}
 	d, err := time.ParseDuration(v)
-	if err != nil || d < MinCallLimit || d > MaxCallLimit {
-		return 0, fmt.Errorf("max_call must be a duration from %s to %s", MinCallLimit, MaxCallLimit)
+	if err != nil || d < lo || d > hi {
+		return 0, fmt.Errorf("%s must be a duration from %s to %s", name, lo, hi)
 	}
 	return d, nil
 }
@@ -173,7 +201,8 @@ func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindB
 // ValidateConnectionSchema checks a schema's structure, limits, and that every
 // declared default satisfies its own field spec: at least one kind, each a
 // known kind with its fields (and, for a bind kind only, its target and
-// agentless; for bind-call only, its max_call), keys unique within the kind.
+// agentless; for bind-call only, its max_call; for bind-persistent only,
+// its max_open), keys unique within the kind.
 func ValidateConnectionSchema(s ConnectionSchema) error {
 	if s.SchemaVersion != ConnectionSchemaV2 {
 		return fmt.Errorf("unsupported connection schema_version %q", s.SchemaVersion)
@@ -197,6 +226,8 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			return fmt.Errorf("kinds.%s: only a bind kind is agentless", kind)
 		case k.MaxCall != "" && kind != KindBindCall:
 			return fmt.Errorf("kinds.%s: only a bind-call kind says max_call", kind)
+		case k.MaxOpen != "" && kind != KindBindPersistent:
+			return fmt.Errorf("kinds.%s: only a bind-persistent kind says max_open", kind)
 		case len(k.Fields) == 0 && len(k.Target) == 0:
 			return fmt.Errorf("kinds.%s: at least one field", kind)
 		case len(k.Fields) > MaxConnectionFields || len(k.Target) > MaxConnectionFields:
@@ -206,6 +237,9 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			return fmt.Errorf("kinds.%s: %w", kind, err)
 		}
 		if _, err := callLimit(k.MaxCall); err != nil {
+			return fmt.Errorf("kinds.%s: %w", kind, err)
+		}
+		if _, err := openLimit(k.MaxOpen); err != nil {
 			return fmt.Errorf("kinds.%s: %w", kind, err)
 		}
 		keys := map[string]bool{}

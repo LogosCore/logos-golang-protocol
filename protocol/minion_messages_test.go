@@ -434,3 +434,27 @@ func TestValidateBuildMessage(t *testing.T) {
 		}
 	}
 }
+
+// A reack names 1 to MaxReackTasks tasks, each 16 bytes.
+func TestReackItem(t *testing.T) {
+	id := bytes.Repeat([]byte{7}, 16)
+	if err := (ReackItem{T: ItemReack, Tasks: [][]byte{id, id}}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	many := make([][]byte, MaxReackTasks+1)
+	for i := range many {
+		many[i] = id
+	}
+	for name, r := range map[string]ReackItem{
+		"none":       {T: ItemReack},
+		"too many":   {T: ItemReack, Tasks: many},
+		"short task": {T: ItemReack, Tasks: [][]byte{id[:4]}},
+	} {
+		if r.Validate() == nil {
+			t.Errorf("%s: valid", name)
+		}
+	}
+	if ItemName(ItemReack) != "reack" {
+		t.Error(ItemName(ItemReack))
+	}
+}
