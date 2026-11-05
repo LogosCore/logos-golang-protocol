@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -58,6 +59,12 @@ const (
 	FieldEnumList   FieldType = "enum_list"   // JSON array of distinct option values
 	FieldFile       FieldType = "file"        // a file's id: a build file, or a command's task file; build schemas only
 	FieldStream     FieldType = "stream"      // a file's name: one core streams the minion as it is uploaded; command params only
+	// FieldCredential is a credential's id, FieldCredentialList a list of
+	// them in the operator's order (MaxItems bounds it): one of the
+	// operation's credentials (credentials.go), of a type Accept names.
+	// Only for what belongs to an operation: build and connection schemas.
+	FieldCredential     FieldType = "credential"
+	FieldCredentialList FieldType = "credential_list"
 )
 
 // ApplyMode says whether a property change takes effect immediately or only
@@ -137,6 +144,9 @@ type FieldSpec struct {
 	// types ("image/x-icon", "image/*") a file may have, any when empty, and
 	// its largest size in bytes, no limit when 0. The value is only the
 	// file's id, so they are checked against the file itself (ValidateFile).
+	// For credential and credential_list, Accept is the credential types
+	// the field takes (CredentialTypeKey, ...), any when empty, checked
+	// against the credential itself (ValidateCredential).
 	Accept  []string `json:"accept,omitempty"`
 	MaxSize int64    `json:"max_size,omitempty"`
 	// Num is a command param's number: how a task names it on the wire
@@ -285,6 +295,7 @@ var fieldTypes = map[FieldType]bool{
 	FieldString: true, FieldInt: true, FieldNumber: true, FieldBool: true, FieldEnum: true,
 	FieldDuration: true, FieldBytes: true, FieldURL: true, FieldSecret: true, FieldStringList: true,
 	FieldStringMap: true, FieldDatetime: true, FieldEnumList: true, FieldFile: true,
+	FieldCredential: true, FieldCredentialList: true,
 }
 
 // A file field's accept entries: an extension, or a media type whose subtype
@@ -369,7 +380,7 @@ func ValidateManifest(m ManagementManifest) error {
 			return fmt.Errorf("duplicate status key %q", s.Key)
 		}
 		seen[s.Key] = true
-		if !fieldTypes[s.Type] || s.Type == FieldSecret || s.Type == FieldFile {
+		if !fieldTypes[s.Type] || s.Type == FieldSecret || s.Type == FieldFile || isCredentialField(s.Type) {
 			return fmt.Errorf("status %q: invalid type %q", s.Key, s.Type)
 		}
 		if err := validateText(s.Label, s.Description); err != nil {
@@ -409,14 +420,35 @@ func validateText(label, description string) error {
 	return nil
 }
 
-// validateFieldSpec checks a field of a management manifest or a connection
-// schema, where file fields are refused: only a build hands files to a module.
-func validateFieldSpec(f FieldSpec) error { return checkFieldSpec(f, false) }
+// fieldScope is where a field is declared, which decides the types it may
+// have: a file only where a build hands one over, a credential only where
+// what holds the values belongs to an operation, as credentials do.
+type fieldScope int
+
+const (
+	// scopeModule: a manifest's properties and action params, the module's
+	// own, in no operation.
+	scopeModule fieldScope = iota
+	// scopeConnection: a connection schema's fields (an endpoint's) and its
+	// targets' fields.
+	scopeConnection
+	// scopeBuild: a build schema's fields, connection parameters and
+	// command params.
+	scopeBuild
+)
+
+// validateFieldSpec checks a field of a management manifest, where neither
+// files nor credentials are taken: a module's settings are no operation's.
+func validateFieldSpec(f FieldSpec) error { return checkFieldSpec(f, scopeModule) }
+
+// validateConnectionFieldSpec checks a field of a connection schema: an
+// endpoint's or a target's, which may take credentials but no files.
+func validateConnectionFieldSpec(f FieldSpec) error { return checkFieldSpec(f, scopeConnection) }
 
 // validateBuildFieldSpec checks a field of a build schema.
-func validateBuildFieldSpec(f FieldSpec) error { return checkFieldSpec(f, true) }
+func validateBuildFieldSpec(f FieldSpec) error { return checkFieldSpec(f, scopeBuild) }
 
-func checkFieldSpec(f FieldSpec, allowFile bool) error {
+func checkFieldSpec(f FieldSpec, scope fieldScope) error {
 	if !keyPattern.MatchString(f.Key) {
 		return fmt.Errorf("key must match %s", keyPattern)
 	}
@@ -426,8 +458,11 @@ func checkFieldSpec(f FieldSpec, allowFile bool) error {
 	if !fieldTypes[f.Type] {
 		return fmt.Errorf("invalid type %q", f.Type)
 	}
-	if f.Type == FieldFile && !allowFile {
+	if f.Type == FieldFile && scope != scopeBuild {
 		return fmt.Errorf("type file is only for build schemas")
+	}
+	if isCredentialField(f.Type) && scope == scopeModule {
+		return fmt.Errorf("type %s is only for build and connection schemas: credentials belong to an operation", f.Type)
 	}
 	if err := validateText(f.Label, f.Description); err != nil {
 		return err
@@ -456,11 +491,18 @@ func checkFieldSpec(f FieldSpec, allowFile bool) error {
 			return fmt.Errorf("invalid key_pattern: %w", err)
 		}
 	}
-	if f.MaxItems < 0 || (f.MaxItems > 0 && f.Type != FieldStringList && f.Type != FieldStringMap && f.Type != FieldEnumList) {
-		return fmt.Errorf("max_items is a positive count, only for string_list, string_map and enum_list")
+	if f.MaxItems < 0 || (f.MaxItems > 0 && f.Type != FieldStringList && f.Type != FieldStringMap && f.Type != FieldEnumList &&
+		f.Type != FieldCredentialList) {
+		return fmt.Errorf("max_items is a positive count, only for string_list, string_map, enum_list and credential_list")
 	}
-	if f.Type != FieldFile && (len(f.Accept) > 0 || f.MaxSize != 0) {
-		return fmt.Errorf("accept and max_size are only for file")
+	if f.Type == FieldCredentialList && f.MaxItems > MaxCredentialListItems {
+		return fmt.Errorf("max_items is %d at most for a credential_list", MaxCredentialListItems)
+	}
+	if f.Type != FieldFile && f.MaxSize != 0 {
+		return fmt.Errorf("max_size is only for file")
+	}
+	if f.Type != FieldFile && !isCredentialField(f.Type) && len(f.Accept) > 0 {
+		return fmt.Errorf("accept is only for file, credential and credential_list")
 	}
 	if f.MaxSize < 0 {
 		return fmt.Errorf("max_size must not be negative")
@@ -468,8 +510,16 @@ func checkFieldSpec(f FieldSpec, allowFile bool) error {
 	if len(f.Accept) > MaxAcceptEntries {
 		return fmt.Errorf("at most %d accept entries", MaxAcceptEntries)
 	}
-	for _, a := range f.Accept {
-		if !acceptExtPattern.MatchString(a) && !acceptMediaPattern.MatchString(a) {
+	for i, a := range f.Accept {
+		switch {
+		case isCredentialField(f.Type):
+			if !IsCredentialType(a) {
+				return fmt.Errorf("accept %q is not a credential type (%s)", a, strings.Join(CredentialTypes(), ", "))
+			}
+			if slices.Contains(f.Accept[:i], a) {
+				return fmt.Errorf("accept names %s twice", a)
+			}
+		case !acceptExtPattern.MatchString(a) && !acceptMediaPattern.MatchString(a):
 			return fmt.Errorf("accept %q is neither an extension (.ico) nor a media type (image/x-icon)", a)
 		}
 	}
@@ -502,6 +552,11 @@ func checkFieldSpec(f FieldSpec, allowFile bool) error {
 		// A file belongs to an operation, which a schema cannot name.
 		if f.Default != nil {
 			return fmt.Errorf("a file field has no default")
+		}
+	case FieldCredential, FieldCredentialList:
+		// So does a credential.
+		if f.Default != nil {
+			return fmt.Errorf("a %s field has no default", f.Type)
 		}
 	}
 	if f.Default != nil && f.Type != FieldSecret {
@@ -678,6 +733,34 @@ func ValidateValue(f FieldSpec, v any) error {
 		}
 		if len(s) > MaxFileIDLength {
 			return fmt.Errorf("file id longer than %d characters", MaxFileIDLength)
+		}
+	case FieldCredential:
+		s, ok := v.(string)
+		if !ok || s == "" || len(s) > MaxCredentialIDLength {
+			return fmt.Errorf("must be a credential id")
+		}
+	case FieldCredentialList:
+		ids, err := stringItems(v)
+		if err != nil {
+			return fmt.Errorf("must be a list of credential ids")
+		}
+		limit := MaxCredentialListItems
+		if f.MaxItems > 0 {
+			limit = f.MaxItems
+		}
+		switch {
+		case len(ids) == 0 && f.Required:
+			return fmt.Errorf("value is required")
+		case len(ids) > limit:
+			return fmt.Errorf("at most %d credentials", limit)
+		}
+		for i, id := range ids {
+			if id == "" || len(id) > MaxCredentialIDLength {
+				return fmt.Errorf("item %d must be a credential id", i)
+			}
+			if slices.Contains(ids[:i], id) {
+				return fmt.Errorf("credential %s is listed twice", id)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown type %q", f.Type)

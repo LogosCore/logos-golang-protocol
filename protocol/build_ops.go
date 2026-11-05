@@ -129,7 +129,9 @@ type BuildRequest struct {
 	Platform      string `json:"platform"`
 	SchemaVersion int    `json:"schema_version"`
 	// Values holds every field of the target that has a value or a default.
-	// A file field holds the file's id; the file is in Files.
+	// A file field holds the file's id; the file is in Files. A credential
+	// field holds a credential's id (a credential_list field, ids); the
+	// credential is in Credentials.
 	Values map[string]any `json:"values"`
 	// Commands are the ids of the commands the minion is built with: those
 	// the operator picked, the target's required ones among them, in the
@@ -145,6 +147,10 @@ type BuildRequest struct {
 	Failover *BuildFailover `json:"failover,omitempty"`
 	// Files are the files that values name, by id.
 	Files map[string]BuildFile `json:"files,omitempty"`
+	// Credentials are the credentials that values name, by id: the
+	// target's values', the connections' values' and their endpoints'
+	// params'. Secret, as values are: for the build only.
+	Credentials map[string]Credential `json:"credentials,omitempty"`
 	// Crypto is set when the factory declares a crypto suite.
 	Crypto *BuildCrypto `json:"crypto,omitempty"`
 	// SessionID is the persisted session the minion claims in its hello, a
@@ -352,6 +358,12 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 			add(prefix+k, "%s", reason)
 		}
 		for _, f := range fields {
+			if isCredentialField(f.Type) {
+				if _, err := FieldCredentials(f, values[f.Key], r.Credentials); err != nil {
+					add(prefix+f.Key, "%v", err)
+				}
+				continue
+			}
 			id, ok := values[f.Key].(string)
 			if f.Type != FieldFile || !ok || id == "" {
 				continue
@@ -363,6 +375,9 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 				add(prefix+f.Key, "%v", err)
 			}
 		}
+	}
+	if err := validateGivenCredentials(r.Credentials); err != nil {
+		add("credentials", "%v", err)
 	}
 
 	t, ok := s.Target(r.Target)

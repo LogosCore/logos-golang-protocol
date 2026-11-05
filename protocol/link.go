@@ -69,6 +69,8 @@ func LinkFailName(kind int) string {
 
 // Limits of a link frame.
 const (
+	// MaxLinkLogins bounds an answer's logins.
+	MaxLinkLogins = MaxCredentialListItems
 	// MaxLinkFrameSize bounds a link frame: a minion message's sealed frame
 	// with the values and room to spare.
 	MaxLinkFrameSize = MaxMinionMessageSize + 128<<10
@@ -88,6 +90,12 @@ const (
 // and its own timeout). To an agentless kind (ConnectionKind.Agentless) it
 // carries Keys too: the keys of ID, which the channel acting as the minion
 // opens the message and seals its answer with.
+//
+// A call and an open carry Credentials too, when the values name any: the
+// credentials of the endpoint's and the target's credential fields
+// (FieldCredential), by id, as the values name them by id. The answer may
+// carry Logins: how each credential the channel tried fared, so core can
+// say which worked (an agentless channel logging in to a server).
 //
 // An open carries Request, Values, Deadline and Under: the id the minion
 // speaks under on the new connection, 16 bytes, its target's open session's
@@ -123,6 +131,19 @@ type LinkFrame struct {
 	Peer     string         `cbor:"9,keyasint,omitempty"`
 	Under    []byte         `cbor:"10,keyasint,omitempty"`
 	Keys     *LinkKeys      `cbor:"11,keyasint,omitempty"`
+	// Credentials and Logins: keys of their own, so a channel from before
+	// them decodes the frame.
+	Credentials map[string]Credential `cbor:"12,keyasint,omitempty"`
+	Logins      []LinkLogin           `cbor:"13,keyasint,omitempty"`
+}
+
+// LinkLogin is how one of a call's or an open's credentials fared at the
+// target, in the order the channel tried them: Accepted when it logged in,
+// else refused. A credential the channel never got to (one before it logged
+// in) is not listed.
+type LinkLogin struct {
+	Credential string `cbor:"1,keyasint"`
+	Accepted   bool   `cbor:"2,keyasint,omitempty"`
 }
 
 // LinkKeys are the keys of the id a call's or an open's messages go under
@@ -197,6 +218,11 @@ func (f LinkFrame) Validate() error {
 			return errors.New("link call: under is an open's")
 		case f.Keys != nil && f.Keys.Validate() != nil:
 			return f.Keys.Validate()
+		case f.Logins != nil:
+			return errors.New("link call: logins are an answer's")
+		}
+		if err := validateGivenCredentials(f.Credentials); err != nil {
+			return fmt.Errorf("link call: %w", err)
 		}
 	case LinkOpen:
 		switch {
@@ -208,11 +234,18 @@ func (f LinkFrame) Validate() error {
 			return f.Keys.Validate()
 		case f.Keys != nil && f.Under == nil:
 			return errors.New("link open: keys are under's")
+		case f.Logins != nil:
+			return errors.New("link open: logins are an answer's")
+		}
+		if err := validateGivenCredentials(f.Credentials); err != nil {
+			return fmt.Errorf("link open: %w", err)
 		}
 	case LinkAnswer:
 		switch {
-		case f.Values != nil || f.Deadline != 0 || f.Under != nil || f.Keys != nil:
+		case f.Values != nil || f.Deadline != 0 || f.Under != nil || f.Keys != nil || f.Credentials != nil:
 			return errors.New("link answer: a request's keys")
+		case len(f.Logins) > MaxLinkLogins:
+			return fmt.Errorf("link answer: %d logins at most", MaxLinkLogins)
 		case (f.ID == nil) != (f.Data == nil):
 			return errors.New("link answer: id and data come together")
 		case f.ID != nil && len(f.ID) != 16:
@@ -231,6 +264,11 @@ func (f LinkFrame) Validate() error {
 		if f.Peer != "" {
 			if _, err := netip.ParseAddr(f.Peer); err != nil {
 				return fmt.Errorf("link answer: peer %q is not an IP address", f.Peer)
+			}
+		}
+		for i, l := range f.Logins {
+			if l.Credential == "" || len(l.Credential) > MaxCredentialIDLength {
+				return fmt.Errorf("link answer: login %d names no credential", i)
 			}
 		}
 		if f.Failure != nil {

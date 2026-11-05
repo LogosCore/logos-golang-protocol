@@ -707,7 +707,7 @@ func ValidateFile(f FieldSpec, file BuildFile) error {
 // rules of a file's.
 func checkCommandParam(p FieldSpec) error {
 	if p.Type != FieldStream {
-		return checkFieldSpec(p, true)
+		return checkFieldSpec(p, scopeBuild)
 	}
 	switch {
 	case !keyPattern.MatchString(p.Key):

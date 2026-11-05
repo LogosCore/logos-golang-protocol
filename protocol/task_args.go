@@ -87,7 +87,7 @@ func taskArg(f FieldSpec, v any) (any, error) {
 			return nil, fmt.Errorf("must be an RFC 3339 timestamp")
 		}
 		return t.Unix(), nil
-	case FieldStringList, FieldEnumList:
+	case FieldStringList, FieldEnumList, FieldCredentialList:
 		switch items := v.(type) {
 		case []string:
 			return items, nil
@@ -126,7 +126,9 @@ func taskArg(f FieldSpec, v any) (any, error) {
 
 // WireArgs are a task's args as it carries them: args (TaskArgs, by param
 // key) by their params' numbers (FieldSpec.Num). An arg whose param has no
-// number is left out.
+// number is left out. A credential param's arg is to be its Credential, a
+// credential_list's its []Credential, by then: TaskArgs leaves the ids, and
+// core puts the credentials in their place.
 func WireArgs(params []FieldSpec, args map[string]any) Args {
 	if len(args) == 0 {
 		return nil

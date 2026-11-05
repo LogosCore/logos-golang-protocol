@@ -368,9 +368,10 @@ type TaskItem struct {
 }
 
 // Args are a task's args: its params' numbers (FieldSpec.Num) to their
-// values (WireArgs). A file or stream param's value is a FileOffer,
+// values (WireArgs). A file or stream param's value is a FileOffer, a
+// credential param's a Credential (a credential_list's a list of them),
 // numbered keys as every protocol map has: decoded, it stays the CBOR it
-// came as (a cbor.RawMessage), which ArgFile reads.
+// came as (a cbor.RawMessage), which ArgFile and ArgCredential read.
 type Args map[uint64]any
 
 // UnmarshalCBOR decodes args, keeping an integer-keyed map as it came.
@@ -385,7 +386,7 @@ func (a *Args) UnmarshalCBOR(data []byte) error {
 	}
 	out := make(Args, len(raw))
 	for k, v := range raw {
-		if isIntKeyedMap(v) {
+		if isIntKeyedMap(v) || isIntKeyedMapList(v) {
 			out[k] = v
 			continue
 		}
@@ -397,6 +398,19 @@ func (a *Args) UnmarshalCBOR(data []byte) error {
 	}
 	*a = out
 	return nil
+}
+
+// isIntKeyedMapList reports whether b is a CBOR array whose first item is an
+// integer-keyed map (a credential_list's credentials).
+func isIntKeyedMapList(b []byte) bool {
+	if len(b) == 0 || b[0]>>5 != 4 {
+		return false
+	}
+	head := map[byte]int{24: 2, 25: 3, 26: 5, 27: 9}[b[0]&0x1f]
+	if b[0]&0x1f < 24 {
+		head = 1
+	}
+	return head > 0 && len(b) > head && isIntKeyedMap(b[head:])
 }
 
 // isIntKeyedMap reports whether b is a CBOR map whose first key is an

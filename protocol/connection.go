@@ -244,7 +244,7 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 		}
 		keys := map[string]bool{}
 		for _, f := range append(slices.Clone(k.Fields), k.Target...) {
-			if err := validateFieldSpec(f); err != nil {
+			if err := validateConnectionFieldSpec(f); err != nil {
 				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
 			}
 			if keys[f.Key] {
