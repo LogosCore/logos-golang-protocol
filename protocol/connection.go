@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"time"
 )
 
 // This file defines the minion connection schema: the parameters a minion
@@ -59,14 +60,49 @@ type ConnectionSchema struct {
 // Agentless, for a bind kind only, says the channel acts as the minion on
 // connections of the kind: no minion runs on the target, and the channel
 // reads and writes the messages it carries there (docs:
-// contracts/agentless-channels/). Only such a kind carries the unsealed
-// messages of a CryptoNone build. The channel's code says it, never an
-// operator or a factory: it is what the channel does.
+// contracts/agentless-channels/). Core gives such a channel the keys of each
+// call's and open's id (LinkFrame.Keys): it opens core's messages and seals
+// the minion's as the minion would. A channel of any other kind never sees
+// a key, and relays sealed frames it cannot read. The channel's code says
+// it, never an operator or a factory.
+//
+// MaxCall, for bind-call only, is the longest a call of the kind may take,
+// as a duration ("10m"), MinCallLimit to MaxCallLimit: a channel whose
+// transport is slow (a DNS tunnel, mail) asks for more, one that is quick
+// for less. Empty: core's own. Core keeps each call within the shorter of
+// it and its own limit, and says the result as the call's deadline
+// (LinkFrame.Deadline).
 type ConnectionKind struct {
 	Fields     []FieldSpec `json:"fields"`
 	Target     []FieldSpec `json:"target,omitempty"`
 	MaxMessage int         `json:"max_message,omitempty"`
 	Agentless  bool        `json:"agentless,omitempty"`
+	MaxCall    string      `json:"max_call,omitempty"`
+}
+
+// The bounds of a kind's MaxCall.
+const (
+	MinCallLimit = time.Second
+	MaxCallLimit = time.Hour
+)
+
+// CallLimit is how long a call of kind may take, as the kind says
+// (MaxCall); 0 when it says none, or for a kind the channel does not carry.
+func (s ConnectionSchema) CallLimit(kind string) time.Duration {
+	d, _ := callLimit(s.Kinds[kind].MaxCall)
+	return d
+}
+
+// callLimit reads a declared MaxCall: 0 for none.
+func callLimit(v string) (time.Duration, error) {
+	if v == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < MinCallLimit || d > MaxCallLimit {
+		return 0, fmt.Errorf("max_call must be a duration from %s to %s", MinCallLimit, MaxCallLimit)
+	}
+	return d, nil
 }
 
 // MinConnectionMessage is the least a connection kind may say it carries:
@@ -137,7 +173,7 @@ func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindB
 // ValidateConnectionSchema checks a schema's structure, limits, and that every
 // declared default satisfies its own field spec: at least one kind, each a
 // known kind with its fields (and, for a bind kind only, its target and
-// agentless), keys unique within the kind.
+// agentless; for bind-call only, its max_call), keys unique within the kind.
 func ValidateConnectionSchema(s ConnectionSchema) error {
 	if s.SchemaVersion != ConnectionSchemaV2 {
 		return fmt.Errorf("unsupported connection schema_version %q", s.SchemaVersion)
@@ -159,12 +195,17 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			return fmt.Errorf("kinds.%s: only a bind kind has target fields", kind)
 		case k.Agentless && !bind:
 			return fmt.Errorf("kinds.%s: only a bind kind is agentless", kind)
+		case k.MaxCall != "" && kind != KindBindCall:
+			return fmt.Errorf("kinds.%s: only a bind-call kind says max_call", kind)
 		case len(k.Fields) == 0 && len(k.Target) == 0:
 			return fmt.Errorf("kinds.%s: at least one field", kind)
 		case len(k.Fields) > MaxConnectionFields || len(k.Target) > MaxConnectionFields:
 			return fmt.Errorf("kinds.%s: too many fields (%d at most)", kind, MaxConnectionFields)
 		}
 		if err := validMaxMessage(k.MaxMessage); err != nil {
+			return fmt.Errorf("kinds.%s: %w", kind, err)
+		}
+		if _, err := callLimit(k.MaxCall); err != nil {
 			return fmt.Errorf("kinds.%s: %w", kind, err)
 		}
 		keys := map[string]bool{}

@@ -13,8 +13,7 @@ import (
 // Core sends a call; the channel delivers the sealed message to the target
 // and answers with what came back, by the request's id. Each binary frame is
 // one LinkFrame. On an agentless kind (ConnectionKind.Agentless) the channel
-// is the minion: it answers the message itself, and for a CryptoNone build
-// the message travels unsealed.
+// is the minion: it answers the message itself.
 
 // LinkPath is core's endpoint for the control link, under core's base URL:
 // a WebSocket handshake with HeaderChannelInstance.
@@ -28,7 +27,7 @@ const (
 	// LinkOpen (core → channel): open a bind-persistent connection to the
 	// target Values say: the channel dials, then opens the connection's
 	// socket naming the request (HeaderOpenRequest), or answers with a
-	// failure.
+	// failure. Under says the id the minion speaks under on it.
 	LinkOpen = 2
 	// LinkAnswer (channel → core): the answer to request Request.
 	LinkAnswer = 3
@@ -45,14 +44,13 @@ const (
 	// LinkFailOther: anything else (the target's values do not make a
 	// request, a proxy failed, the channel draining).
 	LinkFailOther = 4
-	// LinkFailLogin: the target refused the login the channel was given
-	// (an agentless channel's: ConnectionKind.Agentless); the message says
-	// why, and what the target offers. Retrying changes nothing until the
-	// target is edited.
+	// LinkFailLogin: the target refused the login the channel was given;
+	// the message says why, and what the target offers. Retrying changes
+	// nothing until the target is edited.
 	LinkFailLogin = 5
 	// LinkFailHostKey: the target is not the one the target's values say
-	// (an agentless channel's: its host key, or its certificate, is not
-	// the one given); the message says what it presented.
+	// (its host key, or its certificate, is not the one given); the message
+	// says what it presented.
 	LinkFailHostKey = 6
 )
 
@@ -85,9 +83,19 @@ const (
 //
 // A call carries Request, Values (the build connection's built-in values
 // and the target's, by the keys the channel declared for the kind), ID (the
-// id the message is sent under, 16 bytes), Data (the sealed message, or a
-// CryptoNone build's message itself) and Deadline (milliseconds, optional:
-// the channel keeps to the shorter of it and its own timeout).
+// id the message is sent under, 16 bytes), Data (the sealed message) and
+// Deadline (milliseconds, optional: the channel keeps to the shorter of it
+// and its own timeout). To an agentless kind (ConnectionKind.Agentless) it
+// carries Keys too: the keys of ID, which the channel acting as the minion
+// opens the message and seals its answer with.
+//
+// An open carries Request, Values, Deadline and Under: the id the minion
+// speaks under on the new connection, 16 bytes, its target's open session's
+// id, else its build's. The minion speaks first, as on any persistent
+// connection; one that keeps no ids of its own (a channel acting as it)
+// takes them from Under, and a channel whose minion knows its ids ignores
+// it. A key of its own, so a channel from before it decodes the frame. To an
+// agentless kind it carries Keys too: the keys of Under.
 //
 // An answer carries Request and one of:
 //   - ID and Data: what came back was a minion message in the channel's
@@ -113,6 +121,28 @@ type LinkFrame struct {
 	Failure  *LinkFailure   `cbor:"7,keyasint,omitempty"`
 	Excerpt  []byte         `cbor:"8,keyasint,omitempty"`
 	Peer     string         `cbor:"9,keyasint,omitempty"`
+	Under    []byte         `cbor:"10,keyasint,omitempty"`
+	Keys     *LinkKeys      `cbor:"11,keyasint,omitempty"`
+}
+
+// LinkKeys are the keys of the id a call's or an open's messages go under
+// (its build's, its session's), for a channel that acts as the minion
+// (ConnectionKind.Agentless): Suite, the build's, and its Material. Core
+// sends them with every call and open, as such a channel keeps nothing.
+type LinkKeys struct {
+	Suite    string                      `cbor:"1,keyasint"`
+	Material AES256CBCHMACSHA256Material `cbor:"2,keyasint"`
+}
+
+// Validate checks the suite is one the protocol has and its keys' sizes.
+func (k LinkKeys) Validate() error {
+	if k.Suite != CryptoAES256CBCHMACSHA256 {
+		return fmt.Errorf("link keys: suite %q", k.Suite)
+	}
+	if len(k.Material.EncKey) != 32 || len(k.Material.MACKey) != 32 {
+		return errors.New("link keys: two 32-byte keys")
+	}
+	return nil
 }
 
 // LinkFailure is why a call reached nothing: Kind (LinkFailUnreachable,
@@ -163,14 +193,25 @@ func (f LinkFrame) Validate() error {
 			return errors.New("link call: no message")
 		case f.Status != 0 || f.Failure != nil || f.Excerpt != nil || f.Peer != "":
 			return errors.New("link call: an answer's keys")
+		case f.Under != nil:
+			return errors.New("link call: under is an open's")
+		case f.Keys != nil && f.Keys.Validate() != nil:
+			return f.Keys.Validate()
 		}
 	case LinkOpen:
-		if f.ID != nil || f.Data != nil || f.Status != 0 || f.Failure != nil || f.Excerpt != nil || f.Peer != "" {
-			return errors.New("link open: only request, values and deadline")
+		switch {
+		case f.ID != nil || f.Data != nil || f.Status != 0 || f.Failure != nil || f.Excerpt != nil || f.Peer != "":
+			return errors.New("link open: only request, values, deadline and under")
+		case f.Under != nil && len(f.Under) != 16:
+			return errors.New("link open: under is 16 bytes")
+		case f.Keys != nil && f.Keys.Validate() != nil:
+			return f.Keys.Validate()
+		case f.Keys != nil && f.Under == nil:
+			return errors.New("link open: keys are under's")
 		}
 	case LinkAnswer:
 		switch {
-		case f.Values != nil || f.Deadline != 0:
+		case f.Values != nil || f.Deadline != 0 || f.Under != nil || f.Keys != nil:
 			return errors.New("link answer: a request's keys")
 		case (f.ID == nil) != (f.Data == nil):
 			return errors.New("link answer: id and data come together")

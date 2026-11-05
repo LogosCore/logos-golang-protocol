@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func validConnection() ConnectionSchema {
@@ -53,8 +54,26 @@ func TestValidateConnectionSchema(t *testing.T) {
 		agentless.IsAgentless(KindReverseCall) || agentless.IsAgentless(KindBindPersistent) {
 		t.Fatalf("an agentless bind kind: %v", err)
 	}
+	slow := validConnection()
+	sk := slow.Kinds[KindBindCall]
+	sk.MaxCall = "10m"
+	slow.Kinds[KindBindCall] = sk
+	if err := ValidateConnectionSchema(slow); err != nil || slow.CallLimit(KindBindCall) != 10*time.Minute ||
+		validConnection().CallLimit(KindBindCall) != 0 || slow.CallLimit(KindReverseCall) != 0 {
+		t.Fatalf("a bind-call kind's call limit: %v %s", err, slow.CallLimit(KindBindCall))
+	}
 	cases := map[string]func(*ConnectionSchema){
 		"unsupported connection schema_version": func(s *ConnectionSchema) { s.SchemaVersion = "1" },
+		"only a bind-call kind says max_call": func(s *ConnectionSchema) {
+			k := s.Kinds[KindReverseCall]
+			k.MaxCall = "1m"
+			s.Kinds[KindReverseCall] = k
+		},
+		"max_call must be a duration": func(s *ConnectionSchema) {
+			k := s.Kinds[KindBindCall]
+			k.MaxCall = "2h"
+			s.Kinds[KindBindCall] = k
+		},
 		"only a bind kind is agentless": func(s *ConnectionSchema) {
 			k := s.Kinds[KindReverseCall]
 			k.Agentless = true

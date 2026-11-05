@@ -300,27 +300,6 @@ func TestValidateBuildRequest_NoCrypto(t *testing.T) {
 	}
 }
 
-func TestValidateBuildRequest_CryptoNone(t *testing.T) {
-	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
-	s.Crypto = CryptoNone
-	r.Crypto = &BuildCrypto{Suite: CryptoNone}
-	if p := ValidateBuildRequest(s, r); p != nil {
-		t.Fatalf("none, no keys: %v", p)
-	}
-	r.Crypto.Material = json.RawMessage("null")
-	if p := ValidateBuildRequest(s, r); p != nil {
-		t.Fatalf("none, null keys: %v", p)
-	}
-	r.Crypto.Material = json.RawMessage(`{"enc_key":"AAAA"}`)
-	if p := ValidateBuildRequest(s, r); p["crypto.material"] == "" || len(p) != 1 {
-		t.Fatalf("none with keys: %v", p)
-	}
-	r.Crypto = nil
-	if p := ValidateBuildRequest(s, r); p["crypto"] == "" || len(p) != 1 {
-		t.Fatalf("none left out: %v", p)
-	}
-}
-
 func TestBuildResultDocExamples(t *testing.T) {
 	for _, doc := range []string{docBuildSucceeded, docBuildFailed} {
 		var r BuildResult

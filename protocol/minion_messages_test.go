@@ -153,7 +153,6 @@ func TestHello(t *testing.T) {
 		t.Fatalf("x's maps decode as %T, not map[string]any", got.X["cfg"])
 	}
 	for _, bad := range []HelloItem{
-		{OS: "linux", Arch: "amd64"},
 		{PID: 1, Arch: "amd64"},
 		{PID: 1, OS: "linux"},
 		{PID: 1, OS: "linux", Arch: "amd64", Integrity: -1},
@@ -168,20 +167,12 @@ func TestHello(t *testing.T) {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v passed", bad)
 		}
-		// The same checks for a minion an agentless channel acts as, but
-		// for the pid.
-		if bad.PID != 0 && bad.ValidateAgentless() == nil {
-			t.Fatalf("%+v passed as agentless", bad)
-		}
 	}
-	// An agentless minion has no process: pid 0 is taken.
-	agentless := HelloItem{T: ItemHello, OS: "linux", Arch: "amd64", Host: "server01", MachineSource: MachineSSHHostKey,
+	// A minion with no process of its own (one a channel acts as) says pid 0.
+	noProcess := HelloItem{T: ItemHello, OS: "linux", Arch: "amd64", Host: "server01", MachineSource: MachineSSHHostKey,
 		MachineValue: strings.Repeat("ab", 32)}
-	if err := agentless.ValidateAgentless(); err != nil {
-		t.Fatalf("agentless hello: %v", err)
-	}
-	if agentless.Validate() == nil {
-		t.Fatal("a pid 0 passed Validate")
+	if err := noProcess.Validate(); err != nil {
+		t.Fatalf("a hello with pid 0: %v", err)
 	}
 }
 

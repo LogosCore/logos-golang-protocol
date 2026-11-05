@@ -6,11 +6,18 @@ import (
 	"testing"
 )
 
+// testKeys are an agentless call's keys.
+var testKeys = &LinkKeys{Suite: CryptoAES256CBCHMACSHA256,
+	Material: AES256CBCHMACSHA256Material{EncKey: bytes.Repeat([]byte{1}, 32), MACKey: bytes.Repeat([]byte{2}, 32)}}
+
 func TestLinkFrameRoundTrip(t *testing.T) {
 	id := bytes.Repeat([]byte{7}, 16)
 	frames := []LinkFrame{
+		{Type: LinkCall, Request: 5, Values: map[string]any{"host": "h"}, ID: id, Data: []byte{1}, Keys: testKeys},
+		{Type: LinkOpen, Request: 6, Values: map[string]any{"host": "h"}, Under: id, Keys: testKeys},
 		{Type: LinkCall, Request: 1, Values: map[string]any{"url": "http://x/a.php", "tls_verify": true}, ID: id, Data: []byte{1, 2}, Deadline: 30000},
 		{Type: LinkOpen, Request: 2, Values: map[string]any{"host": "10.0.0.1"}},
+		{Type: LinkOpen, Request: 3, Values: map[string]any{"host": "10.0.0.1"}, Under: id},
 		{Type: LinkAnswer, Request: 1, ID: id, Data: []byte{3}, Status: 200},
 		{Type: LinkAnswer, Request: 1, ID: id, Data: []byte{3}, Status: 200, Peer: "203.0.113.7"},
 		{Type: LinkAnswer, Request: 1, Status: 404, Excerpt: []byte("<html>"), Peer: "2001:db8::1"},
@@ -27,7 +34,9 @@ func TestLinkFrameRoundTrip(t *testing.T) {
 			t.Fatalf("decode %+v: %v", f, err)
 		}
 		if got.Type != f.Type || got.Request != f.Request || !bytes.Equal(got.ID, f.ID) || !bytes.Equal(got.Data, f.Data) ||
-			got.Status != f.Status || !bytes.Equal(got.Excerpt, f.Excerpt) || len(got.Values) != len(f.Values) {
+			got.Status != f.Status || !bytes.Equal(got.Excerpt, f.Excerpt) || len(got.Values) != len(f.Values) || !bytes.Equal(got.Under, f.Under) ||
+			(f.Keys != nil && (got.Keys == nil || got.Keys.Suite != f.Keys.Suite || !bytes.Equal(got.Keys.Material.EncKey, f.Keys.Material.EncKey) ||
+				!bytes.Equal(got.Keys.Material.MACKey, f.Keys.Material.MACKey))) {
 			t.Fatalf("round trip: got %+v, want %+v", got, f)
 		}
 	}
@@ -36,11 +45,21 @@ func TestLinkFrameRoundTrip(t *testing.T) {
 func TestLinkFrameRefused(t *testing.T) {
 	id := bytes.Repeat([]byte{7}, 16)
 	bad := map[string]LinkFrame{
-		"no request":           {Type: LinkCall, ID: id, Data: []byte{1}},
-		"call short id":        {Type: LinkCall, Request: 1, ID: id[:8], Data: []byte{1}},
-		"call no data":         {Type: LinkCall, Request: 1, ID: id},
-		"call with status":     {Type: LinkCall, Request: 1, ID: id, Data: []byte{1}, Status: 200},
-		"open with data":       {Type: LinkOpen, Request: 1, Data: []byte{1}},
+		"no request":          {Type: LinkCall, ID: id, Data: []byte{1}},
+		"call short id":       {Type: LinkCall, Request: 1, ID: id[:8], Data: []byte{1}},
+		"call no data":        {Type: LinkCall, Request: 1, ID: id},
+		"call with status":    {Type: LinkCall, Request: 1, ID: id, Data: []byte{1}, Status: 200},
+		"open with data":      {Type: LinkOpen, Request: 1, Data: []byte{1}},
+		"open with an id":     {Type: LinkOpen, Request: 1, ID: id},
+		"open short under":    {Type: LinkOpen, Request: 1, Under: id[:8]},
+		"call with under":     {Type: LinkCall, Request: 1, ID: id, Data: []byte{1}, Under: id},
+		"answer with under":   {Type: LinkAnswer, Request: 1, Status: 404, Under: id},
+		"answer with keys":    {Type: LinkAnswer, Request: 1, Status: 404, Keys: testKeys},
+		"open keys, no under": {Type: LinkOpen, Request: 1, Keys: testKeys},
+		"call unknown suite": {Type: LinkCall, Request: 1, ID: id, Data: []byte{1},
+			Keys: &LinkKeys{Suite: "rot13", Material: testKeys.Material}},
+		"call short keys": {Type: LinkCall, Request: 1, ID: id, Data: []byte{1},
+			Keys: &LinkKeys{Suite: CryptoAES256CBCHMACSHA256, Material: AES256CBCHMACSHA256Material{EncKey: []byte{1}, MACKey: []byte{2}}}},
 		"answer id alone":      {Type: LinkAnswer, Request: 1, ID: id},
 		"answer with values":   {Type: LinkAnswer, Request: 1, Values: map[string]any{"a": 1}},
 		"answer two outcomes":  {Type: LinkAnswer, Request: 1, ID: id, Data: []byte{1}, Failure: &LinkFailure{Kind: 1}},
@@ -116,5 +135,23 @@ func TestTargetValues(t *testing.T) {
 func TestRehelloItemName(t *testing.T) {
 	if ItemName(ItemRehello) != "rehello" {
 		t.Fatal(ItemName(ItemRehello))
+	}
+}
+
+// An open's under travels in a key of its own: a channel that knows no
+// under (its frame without the field) decodes the open, and the rest of it.
+func TestLinkOpenUnderIsSkippable(t *testing.T) {
+	b, err := EncodeLinkFrame(LinkFrame{Type: LinkOpen, Request: 4, Values: map[string]any{"host": "h"}, Under: bytes.Repeat([]byte{7}, 16)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old struct {
+		Type    int            `cbor:"0,keyasint"`
+		Request uint64         `cbor:"1,keyasint"`
+		Values  map[string]any `cbor:"2,keyasint,omitempty"`
+		ID      []byte         `cbor:"3,keyasint,omitempty"`
+	}
+	if err := cborDec.Unmarshal(b, &old); err != nil || old.Type != LinkOpen || old.Request != 4 || old.ID != nil || old.Values["host"] != "h" {
+		t.Fatalf("an older decoder: %+v (%v)", old, err)
 	}
 }

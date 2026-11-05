@@ -148,10 +148,9 @@ type StageResponseItem struct {
 
 // HelloItem is the minion's host and process: it opens a session, and
 // under a session id it replaces what the session recorded (a rehello).
-// PID, OS and Arch are required; OS and Arch use Go's names, as build
-// platforms do. A minion an agentless channel acts as has no process of
-// its own: its PID is 0 (ValidateAgentless). X holds the factory's own
-// fields.
+// OS and Arch are required, in Go's names, as build platforms have them.
+// PID is the minion's process, 0 for a minion with none of its own (one a
+// channel acts as, say). X holds the factory's own fields.
 type HelloItem struct {
 	T      int    `cbor:"0,keyasint"`
 	PID    uint64 `cbor:"1,keyasint"`
@@ -300,16 +299,6 @@ func (h HelloItem) AddrStrings() []string {
 // integrity level or machine source this version does not know is taken:
 // core shows its number.
 func (h HelloItem) Validate() error {
-	if h.PID == 0 {
-		return errors.New("hello: pid is required")
-	}
-	return h.ValidateAgentless()
-}
-
-// ValidateAgentless is Validate for the hello of a minion an agentless
-// channel acts as (its messages unsealed: CryptoNone): no process runs for
-// it on the target, so a PID of 0 is taken, meaning none.
-func (h HelloItem) ValidateAgentless() error {
 	switch {
 	case h.OS == "":
 		return errors.New("hello: os is required")
