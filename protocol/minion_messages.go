@@ -90,6 +90,16 @@ const (
 	// ItemIdentity: who the session's tasks, or a task, run as when not
 	// the process's own (IdentityItem; minion → core).
 	ItemIdentity = 20
+	// Tunnels (tunnels.go): ItemTunnel opens a stream of a tunnel task
+	// (TunnelItem; core → minion), ItemTunnelReply answers it
+	// (TunnelReplyItem; minion → core); ItemTunnelData, ItemTunnelAck,
+	// ItemTunnelClose and ItemTunnelDatagram go both ways.
+	ItemTunnel         = 21
+	ItemTunnelReply    = 22
+	ItemTunnelData     = 23
+	ItemTunnelAck      = 24
+	ItemTunnelClose    = 25
+	ItemTunnelDatagram = 26
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -99,7 +109,8 @@ var itemNames = map[int]string{
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
 	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
-	ItemIdentity: "identity",
+	ItemIdentity: "identity", ItemTunnel: "tunnel", ItemTunnelReply: "tunnel_reply", ItemTunnelData: "tunnel_data",
+	ItemTunnelAck: "tunnel_ack", ItemTunnelClose: "tunnel_close", ItemTunnelDatagram: "tunnel_datagram",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does

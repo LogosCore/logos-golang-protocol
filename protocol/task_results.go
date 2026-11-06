@@ -78,6 +78,13 @@ const (
 	// new connection. A command may take more (BOB's connect: for how long),
 	// each with a default.
 	ActionSwitchConnection = "switch_connection"
+	// ActionTunnel runs a tunnel (tunnels.go): core gives port, the
+	// operational port it listens on for the task (0: any free one), which
+	// the minion needs nothing of. It has no result: the task runs while
+	// the tunnel is open, its streams going as tunnel items, and core shows
+	// it. A command may take more, each with a default, which only the
+	// minion reads (a connect's timeout, its max_streams).
+	ActionTunnel = "tunnel"
 )
 
 // results are the results this version defines.
@@ -112,6 +119,7 @@ var actions = map[string]CommandAction{
 	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
+	ActionTunnel:           {Params: map[string]FieldType{"port": FieldInt}},
 }
 
 // KnownResult reports whether this version defines the result.
