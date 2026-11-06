@@ -15,7 +15,9 @@ import "fmt"
 // max_tasks of its own, saying what its limit is now, and its get_tasks
 // follow it. 0 takes no new tasks: the minion pauses, its running tasks
 // going on. Core sends a max_tasks only to a minion of a factory that
-// declares it, and a few times at most unanswered.
+// declares it, and a few times at most unanswered. A task of a tunnel
+// action (TunnelActions) holds no place in the limit: both sides count it
+// out, as long as it runs.
 
 // MaxTasksItem is a minion's limit of tasks at once: core → minion, the
 // limit to have; minion → core, the limit it has (in answer to core's, or

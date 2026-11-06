@@ -138,13 +138,13 @@ func TestTunnelNames(t *testing.T) {
 	}
 }
 
-// A tunnel command takes core's port (an int) and names no result; its
-// other params need defaults.
+// A SOCKS proxy's command takes core's port (an int) and names no result;
+// its other params need defaults.
 func TestTunnelAction(t *testing.T) {
-	if a, ok := KnownAction(ActionTunnel); !ok || a.Result != "" || a.Params["port"] != FieldInt || len(a.Params) != 1 {
+	if a, ok := KnownAction(ActionSocksProxy); !ok || a.Result != "" || a.Params["port"] != FieldInt || len(a.Params) != 1 {
 		t.Fatalf("tunnel: %+v %v", a, ok)
 	}
-	socks := BuildCommand{ID: "socks", Op: 9, Action: ActionTunnel, Params: []FieldSpec{
+	socks := BuildCommand{ID: "socks", Op: 9, Action: ActionSocksProxy, Params: []FieldSpec{
 		{Key: "port", Num: 1, Type: FieldInt, Default: 0, Min: 0, Max: 65535},
 		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "10s"},
 		{Key: "max_streams", Num: 3, Type: FieldInt, Default: 256}}}
@@ -165,5 +165,42 @@ func TestTunnelAction(t *testing.T) {
 	noPort.Params = socks.Params[1:]
 	if err := validateResultAction(noPort); err == nil || !strings.Contains(err.Error(), `"port"`) {
 		t.Errorf("tunnel without port: %v", err)
+	}
+}
+
+// A port forward is a tunnel too: core gives port and reads host and to,
+// which may be required (the action's own); the minion's other params need
+// defaults; no result.
+func TestForwardAction(t *testing.T) {
+	if a, ok := KnownAction(ActionPortForward); !ok || a.Result != "" || a.Params["port"] != FieldInt || a.Params["host"] != FieldString ||
+		a.Params["to"] != FieldInt || len(a.Params) != 3 {
+		t.Fatalf("forward: %+v %v", a, ok)
+	}
+	if !IsTunnelAction(ActionSocksProxy) || !IsTunnelAction(ActionPortForward) || IsTunnelAction(ActionListDir) || IsTunnelAction("") ||
+		IsTunnelAction("tunnel") {
+		t.Error("IsTunnelAction")
+	}
+	forward := BuildCommand{ID: "forward", Op: 10, Action: ActionPortForward, Params: []FieldSpec{
+		{Key: "port", Num: 1, Type: FieldInt, Default: 0, Min: 0, Max: 65535},
+		{Key: "host", Num: 2, Type: FieldString, Required: true},
+		{Key: "to", Num: 3, Type: FieldInt, Required: true, Min: 1, Max: 65535},
+		{Key: "timeout", Num: 4, Type: FieldDuration, Default: "10s"}}}
+	if err := validateResultAction(forward); err != nil {
+		t.Errorf("forward: %v", err)
+	}
+	noHost := forward
+	noHost.Params = []FieldSpec{forward.Params[0], forward.Params[2]}
+	if err := validateResultAction(noHost); err == nil || !strings.Contains(err.Error(), `"host"`) {
+		t.Errorf("forward without host: %v", err)
+	}
+	textPort := forward
+	textPort.Params = []FieldSpec{forward.Params[0], forward.Params[1], {Key: "to", Num: 3, Type: FieldString}}
+	if err := validateResultAction(textPort); err == nil || !strings.Contains(err.Error(), `"to"`) {
+		t.Errorf("forward with a text to: %v", err)
+	}
+	noDefault := forward
+	noDefault.Params = append(append([]FieldSpec{}, forward.Params[:3]...), FieldSpec{Key: "max_streams", Num: 5, Type: FieldInt})
+	if err := validateResultAction(noDefault); err == nil || !strings.Contains(err.Error(), "needs a default") {
+		t.Errorf("a minion's param without a default: %v", err)
 	}
 }

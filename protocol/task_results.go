@@ -78,14 +78,31 @@ const (
 	// new connection. A command may take more (BOB's connect: for how long),
 	// each with a default.
 	ActionSwitchConnection = "switch_connection"
-	// ActionTunnel runs a tunnel (tunnels.go): core gives port, the
-	// operational port it listens on for the task (0: any free one), which
-	// the minion needs nothing of. It has no result: the task runs while
-	// the tunnel is open, its streams going as tunnel items, and core shows
-	// it. A command may take more, each with a default, which only the
-	// minion reads (a connect's timeout, its max_streams).
-	ActionTunnel = "tunnel"
+	// ActionSocksProxy runs a tunnel with core's SOCKS proxy in front
+	// (tunnels.go): core gives port, the operational port it listens on for
+	// the task (0: any free one), which the minion needs nothing of. It has
+	// no result: the task runs while the tunnel is open, its streams going
+	// as tunnel items, and core shows it. A command may take more, each with
+	// a default, which only the minion reads (a connect's timeout, its
+	// max_streams).
+	ActionSocksProxy = "socks_proxy"
+	// ActionPortForward runs a tunnel with a port forward in front: core
+	// listens on port as for ActionSocksProxy, and opens each connection to
+	// it as a stream to host:to, which core reads and the minion needs
+	// nothing of (each stream's tunnel item names it). The same items, the
+	// same task, no result; more params, each with a default, the minion's.
+	ActionPortForward = "port_forward"
 )
+
+// TunnelActions are the tunnel actions: a task of a command with one
+// carries streams as tunnel items, whatever core puts in front of its port
+// (SOCKS, a port forward). Such a task holds none of the minion's
+// max_tasks: it runs as long as its tunnel is open, a minion's capability
+// rather than its work, and both sides count it out.
+func TunnelActions() []string { return []string{ActionSocksProxy, ActionPortForward} }
+
+// IsTunnelAction reports whether action is one of TunnelActions.
+func IsTunnelAction(action string) bool { return slices.Contains(TunnelActions(), action) }
 
 // results are the results this version defines.
 var results = map[string]bool{
@@ -119,7 +136,8 @@ var actions = map[string]CommandAction{
 	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
-	ActionTunnel:           {Params: map[string]FieldType{"port": FieldInt}},
+	ActionSocksProxy:       {Params: map[string]FieldType{"port": FieldInt}},
+	ActionPortForward:      {Params: map[string]FieldType{"port": FieldInt, "host": FieldString, "to": FieldInt}},
 }
 
 // KnownResult reports whether this version defines the result.

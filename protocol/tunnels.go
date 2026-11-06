@@ -10,10 +10,11 @@ import (
 // Tunnels (docs: contracts/minion-messages/tunnels): TCP connections a
 // minion makes from its host, and UDP associations, whose bytes core and the
 // minion carry in their messages. Core opens a stream for a task of a
-// command whose action is ActionTunnel; the minion connects (or opens a UDP
-// socket) and each side relays what its end sends. Core speaks the protocol
-// of the operator's tools in front of it (SOCKS); the minion opens, relays
-// and closes streams, nothing more.
+// command whose action is a tunnel action (TunnelActions); the minion
+// connects (or opens a UDP socket) and each side relays what its end sends.
+// Core puts what the operator's tools speak in front of it (a SOCKS proxy,
+// a port forward); the minion opens, relays and closes streams, nothing
+// more.
 //
 // Every item names its task and the stream in it: a number core gives from
 // 1, never reused within the task. Each is safe to send again:
