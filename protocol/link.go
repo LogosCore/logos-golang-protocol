@@ -97,6 +97,12 @@ const (
 // carry Logins: how each credential the channel tried fared, so core can
 // say which worked (an agentless channel logging in to a server).
 //
+// A call and an open to an agentless kind carry Acting too, when the
+// session they go under has an identity a task made (a become): that task,
+// its command and args (credentials in place of ids, resolved at this call),
+// so a channel that keeps nothing between calls takes it up again on every
+// connection, as a minion would keep it. None for any other kind.
+//
 // An open carries Request, Values, Deadline and Under: the id the minion
 // speaks under on the new connection, 16 bytes, its target's open session's
 // id, else its build's. The minion speaks first, as on any persistent
@@ -135,6 +141,27 @@ type LinkFrame struct {
 	// them decodes the frame.
 	Credentials map[string]Credential `cbor:"12,keyasint,omitempty"`
 	Logins      []LinkLogin           `cbor:"13,keyasint,omitempty"`
+	Acting      *LinkActing           `cbor:"14,keyasint,omitempty"`
+}
+
+// LinkActing is the task whose identity is in effect for the session a
+// call or an open goes under (IdentityItem, scope session, its task): its
+// id, command and args, as a task item carries them.
+type LinkActing struct {
+	Task []byte `cbor:"1,keyasint"`
+	Cmd  uint64 `cbor:"2,keyasint"`
+	Args Args   `cbor:"3,keyasint,omitempty"`
+}
+
+// Validate checks the task's id and command.
+func (a LinkActing) Validate() error {
+	switch {
+	case len(a.Task) != 16:
+		return errors.New("acting: the task is 16 bytes")
+	case a.Cmd == 0:
+		return errors.New("acting: a command")
+	}
+	return nil
 }
 
 // LinkLogin is how one of a call's or an open's credentials fared at the
@@ -220,6 +247,10 @@ func (f LinkFrame) Validate() error {
 			return f.Keys.Validate()
 		case f.Logins != nil:
 			return errors.New("link call: logins are an answer's")
+		case f.Acting != nil && f.Keys == nil:
+			return errors.New("link call: acting is an agentless kind's, with keys")
+		case f.Acting != nil && f.Acting.Validate() != nil:
+			return fmt.Errorf("link call: %w", f.Acting.Validate())
 		}
 		if err := validateGivenCredentials(f.Credentials); err != nil {
 			return fmt.Errorf("link call: %w", err)
@@ -236,13 +267,17 @@ func (f LinkFrame) Validate() error {
 			return errors.New("link open: keys are under's")
 		case f.Logins != nil:
 			return errors.New("link open: logins are an answer's")
+		case f.Acting != nil && f.Keys == nil:
+			return errors.New("link open: acting is an agentless kind's, with keys")
+		case f.Acting != nil && f.Acting.Validate() != nil:
+			return fmt.Errorf("link open: %w", f.Acting.Validate())
 		}
 		if err := validateGivenCredentials(f.Credentials); err != nil {
 			return fmt.Errorf("link open: %w", err)
 		}
 	case LinkAnswer:
 		switch {
-		case f.Values != nil || f.Deadline != 0 || f.Under != nil || f.Keys != nil || f.Credentials != nil:
+		case f.Values != nil || f.Deadline != 0 || f.Under != nil || f.Keys != nil || f.Credentials != nil || f.Acting != nil:
 			return errors.New("link answer: a request's keys")
 		case len(f.Logins) > MaxLinkLogins:
 			return fmt.Errorf("link answer: %d logins at most", MaxLinkLogins)

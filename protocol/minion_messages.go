@@ -87,6 +87,9 @@ const (
 	// connection that may not be the one its tasks ran over, or as a new
 	// process (a claim).
 	ItemReack = 19
+	// ItemIdentity: who the session's tasks, or a task, run as when not
+	// the process's own (IdentityItem; minion → core).
+	ItemIdentity = 20
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -96,6 +99,7 @@ var itemNames = map[int]string{
 	ItemGetTasks: "get_tasks", ItemTask: "task", ItemCancel: "cancel", ItemResult: "result",
 	ItemAck: "ack", ItemChunk: "chunk", ItemErr: "err", ItemConnUpdate: "conn_update", ItemResume: "resume",
 	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
+	ItemIdentity: "identity",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -157,11 +161,14 @@ type StageResponseItem struct {
 // PID is the minion's process, 0 for a minion with none of its own (one a
 // channel acts as, say). X holds the factory's own fields.
 type HelloItem struct {
-	T      int    `cbor:"0,keyasint"`
-	PID    uint64 `cbor:"1,keyasint"`
-	OS     string `cbor:"2,keyasint"`
-	Arch   string `cbor:"3,keyasint"`
-	Host   string `cbor:"4,keyasint,omitempty"`
+	T    int    `cbor:"0,keyasint"`
+	PID  uint64 `cbor:"1,keyasint"`
+	OS   string `cbor:"2,keyasint"`
+	Arch string `cbor:"3,keyasint"`
+	Host string `cbor:"4,keyasint,omitempty"`
+	// User, Domain and Integrity are the process's own identity, and only
+	// that: who its work runs as instead (a token, a become) is an
+	// IdentityItem's.
 	User   string `cbor:"5,keyasint,omitempty"`
 	Domain string `cbor:"6,keyasint,omitempty"`
 	Proc   string `cbor:"7,keyasint,omitempty"`

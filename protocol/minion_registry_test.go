@@ -59,6 +59,9 @@ func TestRegistry(t *testing.T) {
 		{ResumeItem{T: ItemResume, Task: id, Ctx: id}, 15, []uint64{0, 1, 2}},
 		{PollItem{T: ItemPoll, Within: 1000}, 16, []uint64{0, 1}},
 		{ReackItem{T: ItemReack, Tasks: [][]byte{id}}, 19, []uint64{0, 1}},
+		{IdentityItem{T: ItemIdentity, Scope: IdentityTask, Task: id, User: "u", Domain: "d", Integrity: IntegrityRoot,
+			How: IdentityBecome, Credential: "c"}, 20, []uint64{0, 1, 2, 3, 4, 5, 6, 7}},
+		{LinkActing{Task: id, Cmd: 1, Args: Args{1: 1}}, -1, []uint64{1, 2, 3}},
 		{FileOffer{Xfer: id, Name: "n", Size: 1, SHA256: id, Stream: true}, -1, []uint64{1, 2, 3, 4, 5}},
 		{LsPiece{ID: 1, Part: 1, Last: true, Path: "/", Sep: "/", Parent: "/", Entries: []LsEntry{entry},
 			Partial: true, Err: ListingErrOther, Owners: []string{"root"}, ErrMsg: "m"}, -1,
@@ -85,6 +88,8 @@ func TestRegistry(t *testing.T) {
 	for name, got := range map[string][]int{
 		"err codes":       {ErrItemBadMessage, ErrItemUnknownItem, ErrItemUnknownTask, ErrItemTooLarge, ErrItemSessionClosed, ErrItemSessionReplaced, ErrItemStale},
 		"integrity":       {IntegrityLow, IntegrityMedium, IntegrityHigh, IntegritySystem, IntegrityRoot, IntegrityUser},
+		"identity scopes": {IdentitySession, IdentityTask},
+		"identity ways":   {IdentityImpersonation, IdentityNetwork, IdentityBecome},
 		"entry types":     {EntryDir, EntryFile, EntryLink, EntryOther},
 		"listing errors":  {ListingErrDenied, ListingErrNotFound, ListingErrOther},
 		"machine sources": {MachineSMBIOSUUID, MachineMacUUID, MachineBSDHostUUID, MachineLinuxMachineID, MachineWinMachineGUID, MachineContainer, MachineDomainSID, MachineHostname, MachineKept, MachineEphemeral, MachineSSHHostKey},
