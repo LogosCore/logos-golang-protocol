@@ -7,23 +7,26 @@ import (
 	"net"
 	"time"
 	"unicode/utf8"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // Tunnels (docs: contracts/minion-messages/tunnels): TCP connections a
 // minion makes from its host, and UDP associations, whose bytes core and the
 // minion carry in their messages. Core opens a stream for a task of a
-// command whose action is a tunnel action (TunnelActions); the minion
-// connects (or opens a UDP socket) and each side relays what its end sends.
-// Core puts what the operator's tools speak in front of it (a SOCKS proxy,
-// a port forward); the minion opens, relays and closes streams, nothing
-// more. A reverse port forward (ActionReversePortForward) goes the other
-// way: the minion listens on its host, says where with a tunnel_listen,
-// and opens a stream for each connection that comes there; core connects
-// each to the task's destination, which the minion never learns. A UDP
-// one listens for datagrams: a stream for each address they come from (a
-// udp tunnel naming it), its datagrams going as tunnel_datagram items, core
-// sending them on from a socket of the stream's own, and the stream ending
-// once it idled TunnelUDPIdle.
+// command whose action is ActionTunnel; the minion connects (or opens a
+// UDP socket) and each side relays what its end sends. Core puts what the
+// operator's tools speak in front of it (the task's front: a SOCKS proxy,
+// an HTTP proxy, a port forward); the minion opens, relays and closes
+// streams, nothing more. A reverse tunnel (ActionReverseTunnel) goes the
+// other way: the minion listens on its host, says where with a
+// tunnel_listen, and opens a stream for each connection that comes there;
+// core connects each to the task's destination, which the minion never
+// learns, or reads a SOCKS request from it. A UDP one listens for
+// datagrams: a stream for each address they come from (a udp tunnel
+// naming it), its datagrams going as tunnel_datagram items, core sending
+// them on from a socket of the stream's own, and the stream ending once it
+// idled TunnelUDPIdle.
 //
 // Every item names its task and the stream in it: a number the side that
 // opens it gives from 1, never reused within the task. Core opens a SOCKS
@@ -33,7 +36,10 @@ import (
 // core → minion, with no Bound and no Msg: core says nothing of its side).
 // A task's streams are all one side's. Each item is safe to send again:
 //
-//   - tunnel for a stream its receiver has: its tunnel_reply again.
+//   - tunnel for a stream its receiver has: its tunnel_reply again. An open
+//     is read strictly (ReadTunnel): one with a key its receiver does not
+//     know, or that does not read though its task and stream do, is
+//     answered TunnelUnsupported, never misread as a plain connect.
 //   - tunnel_data: each direction is a byte stream from 0, and the eof takes
 //     one place after the last byte, as TCP's FIN does. A receiver keeps an
 //     item only when its Off is where it has the stream (its next), so one
@@ -120,6 +126,50 @@ func (t TunnelItem) Validate() error {
 	return tunnelRoom("tunnel", t.Room)
 }
 
+// tunnelKeys is the highest key of a tunnel item this version knows: an
+// open with a key past it is a later version's, which ReadTunnel refuses.
+const tunnelKeys = 6
+
+// ErrTunnelUnsupported: an open (a tunnel item) with a key this version
+// does not know. Ignoring it would misread a later version's open (TLS to
+// the destination, a source address, a socket that is not TCP) as a plain
+// connect, so its receiver answers TunnelUnsupported.
+var ErrTunnelUnsupported = errors.New("tunnel: a key this version does not know")
+
+// ReadTunnel reads an open strictly: the one item whose keys a receiver
+// does not ignore when it does not know them, since the open has its host
+// act. An error wraps ErrTunnelUnsupported for a key past this version's,
+// or says why the item does not read or is not valid. The item has its
+// Task and Stream whenever they read, so a receiver answers it
+// (Answerable: a tunnel_reply, TunnelUnsupported) rather than with an
+// err.
+func ReadTunnel(raw cbor.RawMessage) (TunnelItem, error) {
+	var keys map[int]cbor.RawMessage
+	if err := UnmarshalCBOR(raw, &keys); err != nil {
+		return TunnelItem{}, fmt.Errorf("tunnel: %w", err)
+	}
+	var head struct {
+		Task   []byte `cbor:"1,keyasint"`
+		Stream uint64 `cbor:"2,keyasint"`
+	}
+	_ = UnmarshalCBOR(raw, &head)
+	part := TunnelItem{T: ItemTunnel, Task: head.Task, Stream: head.Stream}
+	for k := range keys {
+		if k < 0 || k > tunnelKeys {
+			return part, fmt.Errorf("%w (key %d)", ErrTunnelUnsupported, k)
+		}
+	}
+	var it TunnelItem
+	if err := UnmarshalCBOR(raw, &it); err != nil {
+		return part, fmt.Errorf("tunnel: %w", err)
+	}
+	return it, it.Validate()
+}
+
+// Answerable reports whether a tunnel_reply can answer the open: its task
+// and its stream read.
+func (t TunnelItem) Answerable() bool { return len(t.Task) == 16 && t.Stream > 0 }
+
 // TunnelReplyItem answers a tunnel: open, or why not. Minion → core for
 // the streams core opens; core → minion for a reverse port forward's, with
 // no Bound and no Msg (core says nothing of its side).
@@ -158,12 +208,17 @@ const (
 	TunnelNotAllowed = 5
 	// TunnelFailed: another failure; Msg says.
 	TunnelFailed = 6
+	// TunnelUnsupported: the receiver does not take the open as it is (a
+	// key it does not know, a kind it does not open): it refused it rather
+	// than misread it. A receiver that does not know it reads it as
+	// TunnelFailed.
+	TunnelUnsupported = 7
 )
 
 var tunnelResultNames = map[int]string{
 	TunnelOpen: "open", TunnelRefused: "refused", TunnelHostUnreachable: "host_unreachable",
 	TunnelNetUnreachable: "net_unreachable", TunnelTimedOut: "timed_out", TunnelNotAllowed: "not_allowed",
-	TunnelFailed: "failed",
+	TunnelFailed: "failed", TunnelUnsupported: "unsupported",
 }
 
 // TunnelResultName is a result's name, for people: "result 9" for one this

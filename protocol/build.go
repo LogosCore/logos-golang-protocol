@@ -209,6 +209,21 @@ type BuildCommand struct {
 	// interactive shell needs a connection either side can speak on at
 	// once): core refuses a task of it on a session on another kind.
 	Kinds []string `json:"kinds,omitempty"`
+	// Opens is what a tunnel command's minion opens (OpenTCP, OpenUDP): TCP
+	// connections and UDP associations (a tunnel), or a TCP or UDP listener
+	// (a reverse tunnel). Empty: TCP alone. Core opens nothing else
+	// through it: a SOCKS UDP ASSOCIATE through a command that opens no
+	// udp is refused at once. Only a tunnel command says it (CanOpen).
+	Opens []string `json:"opens,omitempty"`
+}
+
+// CanOpen reports whether the command's minion opens kind (OpenTCP,
+// OpenUDP): one of its Opens, or TCP when it says none.
+func (c BuildCommand) CanOpen(kind string) bool {
+	if len(c.Opens) == 0 {
+		return kind == OpenTCP
+	}
+	return slices.Contains(c.Opens, kind)
 }
 
 // For reports whether a build of target id can have the command.
@@ -536,6 +551,17 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 		}
 		if slices.Contains(c.Kinds[:i], k) {
 			return fmt.Errorf("kinds: duplicate %q", k)
+		}
+	}
+	if len(c.Opens) > 0 && !IsTunnelAction(c.Action) {
+		return fmt.Errorf("opens: only a tunnel command (%s) says what it opens", strings.Join(TunnelActions(), ", "))
+	}
+	for i, o := range c.Opens {
+		if !slices.Contains(opens, o) {
+			return fmt.Errorf("opens: %q is not one of %s", o, strings.Join(opens, ", "))
+		}
+		if slices.Contains(c.Opens[:i], o) {
+			return fmt.Errorf("opens: duplicate %q", o)
 		}
 	}
 	if len(c.Params) > MaxCommandParams {

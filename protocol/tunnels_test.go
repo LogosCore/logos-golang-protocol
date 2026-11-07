@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -140,107 +141,109 @@ func TestTunnelNames(t *testing.T) {
 	}
 }
 
-// A SOCKS proxy's command takes core's port (an int) and names no result;
-// its other params need defaults.
+// A tunnel's command declares only what its minion reads, each with a
+// default; core adds its own params (the front, the port, a forward's
+// destination, the cap), which carry no num and which a factory may not
+// declare. No result.
 func TestTunnelAction(t *testing.T) {
-	if a, ok := KnownAction(ActionSocksProxy); !ok || a.Result != "" || a.Params["port"] != FieldInt || len(a.Params) != 1 {
+	a, ok := KnownAction(ActionTunnel)
+	if !ok || a.Result != "" || len(a.Params) != 0 {
 		t.Fatalf("tunnel: %+v %v", a, ok)
 	}
-	socks := BuildCommand{ID: "socks", Op: 9, Action: ActionSocksProxy, Params: []FieldSpec{
-		{Key: "port", Num: 1, Type: FieldInt, Default: 0, Min: 0, Max: 65535},
+	var keys []string
+	for _, p := range TunnelCoreParams(ActionTunnel) {
+		keys = append(keys, p.Key)
+		if p.Num != 0 || !IsCoreParam(ActionTunnel, p.Key) {
+			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
+		}
+	}
+	if strings.Join(keys, ",") != "front,port,host,to,cap" {
+		t.Errorf("core's params %v", keys)
+	}
+	front := TunnelCoreParams(ActionTunnel)[0]
+	if front.Type != FieldEnum || front.Default != FrontSOCKS || len(front.Options) != 3 || front.Options[1].Value != FrontHTTP {
+		t.Errorf("front %+v", front)
+	}
+	if !IsTunnelAction(ActionTunnel) || !IsTunnelAction(ActionReverseTunnel) || IsTunnelAction(ActionListDir) || IsTunnelAction("") ||
+		IsTunnelAction("socks_proxy") || IsCoreParam(ActionTunnel, "timeout") || IsCoreParam("", ParamFront) {
+		t.Error("IsTunnelAction, IsCoreParam")
+	}
+	tunnel := BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{OpenTCP, OpenUDP}, Params: []FieldSpec{
 		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "10s"},
-		{Key: "max_streams", Num: 3, Type: FieldInt, Default: 256}}}
-	if err := validateResultAction(socks); err != nil {
+		{Key: "max_streams", Num: 3, Type: FieldInt, Default: 256},
+		{Key: ParamStopIdle, Type: FieldDuration, Default: "1h"}}}
+	if err := validateResultAction(tunnel); err != nil {
 		t.Errorf("tunnel: %v", err)
 	}
-	noDefault := socks
-	noDefault.Params = []FieldSpec{socks.Params[0], {Key: "max_streams", Num: 3, Type: FieldInt}}
+	if err := validateCommandNumbers(tunnel); err != nil {
+		t.Errorf("tunnel's numbers: %v", err)
+	}
+	noDefault := tunnel
+	noDefault.Params = []FieldSpec{{Key: "max_streams", Num: 3, Type: FieldInt}}
 	if err := validateResultAction(noDefault); err == nil || !strings.Contains(err.Error(), "needs a default") {
 		t.Errorf("a param without a default: %v", err)
 	}
-	withResult := socks
+	withResult := tunnel
 	withResult.Result = ResultDirListing
 	if err := validateResultAction(withResult); err == nil || !strings.Contains(err.Error(), "has no result") {
 		t.Errorf("tunnel with a result: %v", err)
 	}
-	noPort := socks
-	noPort.Params = socks.Params[1:]
-	if err := validateResultAction(noPort); err == nil || !strings.Contains(err.Error(), `"port"`) {
-		t.Errorf("tunnel without port: %v", err)
+	for _, key := range []string{ParamFront, ParamPort, ParamHost, ParamTo, ParamCap} {
+		own := tunnel
+		own.Params = append([]FieldSpec{{Key: key, Num: 9, Type: FieldString, Default: "x"}}, tunnel.Params...)
+		if err := validateResultAction(own); err == nil || !strings.Contains(err.Error(), "core's") {
+			t.Errorf("a factory's %s: %v", key, err)
+		}
+	}
+	// The minion gets its own params alone: no front, no port, no
+	// destination, no cap.
+	params := append(append([]FieldSpec{}, tunnel.Params...), TunnelCoreParams(ActionTunnel)...)
+	wire := WireArgs(params, map[string]any{"timeout": int64(10000), "max_streams": int64(256), ParamStopIdle: int64(3600000),
+		ParamFront: FrontForward, ParamPort: int64(41000), ParamHost: "10.0.0.5", ParamTo: int64(3389), ParamCap: int64(1 << 20)})
+	if len(wire) != 2 || wire[2] != int64(10000) || wire[3] != int64(256) {
+		t.Errorf("wire args %v", wire)
 	}
 }
 
-// A port forward is a tunnel too: core gives port and reads host and to,
-// which may be required (the action's own); the minion's other params need
-// defaults; no result.
-func TestForwardAction(t *testing.T) {
-	if a, ok := KnownAction(ActionPortForward); !ok || a.Result != "" || a.Params["port"] != FieldInt || a.Params["host"] != FieldString ||
-		a.Params["to"] != FieldInt || len(a.Params) != 3 {
-		t.Fatalf("forward: %+v %v", a, ok)
-	}
-	if !IsTunnelAction(ActionSocksProxy) || !IsTunnelAction(ActionPortForward) || IsTunnelAction(ActionListDir) || IsTunnelAction("") ||
-		IsTunnelAction("tunnel") {
-		t.Error("IsTunnelAction")
-	}
-	forward := BuildCommand{ID: "forward", Op: 10, Action: ActionPortForward, Params: []FieldSpec{
-		{Key: "port", Num: 1, Type: FieldInt, Default: 0, Min: 0, Max: 65535},
-		{Key: "host", Num: 2, Type: FieldString, Required: true},
-		{Key: "to", Num: 3, Type: FieldInt, Required: true, Min: 1, Max: 65535},
-		{Key: "timeout", Num: 4, Type: FieldDuration, Default: "10s"}}}
-	if err := validateResultAction(forward); err != nil {
-		t.Errorf("forward: %v", err)
-	}
-	noHost := forward
-	noHost.Params = []FieldSpec{forward.Params[0], forward.Params[2]}
-	if err := validateResultAction(noHost); err == nil || !strings.Contains(err.Error(), `"host"`) {
-		t.Errorf("forward without host: %v", err)
-	}
-	textPort := forward
-	textPort.Params = []FieldSpec{forward.Params[0], forward.Params[1], {Key: "to", Num: 3, Type: FieldString}}
-	if err := validateResultAction(textPort); err == nil || !strings.Contains(err.Error(), `"to"`) {
-		t.Errorf("forward with a text to: %v", err)
-	}
-	noDefault := forward
-	noDefault.Params = append(append([]FieldSpec{}, forward.Params[:3]...), FieldSpec{Key: "max_streams", Num: 5, Type: FieldInt})
-	if err := validateResultAction(noDefault); err == nil || !strings.Contains(err.Error(), "needs a default") {
-		t.Errorf("a minion's param without a default: %v", err)
-	}
-}
-
-// A reverse port forward is a tunnel whose destination is core's alone:
-// host and to carry no num (a num on either is refused, and none on the
-// minion's own params), so a task's wire args never take them to the
-// minion.
-func TestReverseForwardAction(t *testing.T) {
-	a, ok := KnownAction(ActionReversePortForward)
+// A reverse tunnel's command declares where its minion listens (bind,
+// listen, udp: the minion's, numbered); core adds the front, the
+// destination and the cap, never the minion's to know.
+func TestReverseTunnelAction(t *testing.T) {
+	a, ok := KnownAction(ActionReverseTunnel)
 	if !ok || a.Result != "" || a.Params["bind"] != FieldString || a.Params["listen"] != FieldInt || a.Params["udp"] != FieldBool ||
-		a.Params["host"] != FieldString || a.Params["to"] != FieldInt || len(a.Params) != 5 {
-		t.Fatalf("reverse forward: %+v %v", a, ok)
+		len(a.Params) != 3 {
+		t.Fatalf("reverse tunnel: %+v %v", a, ok)
 	}
-	if !IsTunnelAction(ActionReversePortForward) || !IsCoreParam(ActionReversePortForward, "host") ||
-		!IsCoreParam(ActionReversePortForward, "to") || IsCoreParam(ActionReversePortForward, "bind") ||
-		IsCoreParam(ActionPortForward, "host") || IsCoreParam("", "host") {
-		t.Error("IsTunnelAction, IsCoreParam")
+	var keys []string
+	for _, p := range TunnelCoreParams(ActionReverseTunnel) {
+		keys = append(keys, p.Key)
 	}
-	reverse := BuildCommand{ID: "reverse_port_forward", Op: 17, Action: ActionReversePortForward, Params: []FieldSpec{
+	if strings.Join(keys, ",") != "front,host,to,cap" {
+		t.Errorf("core's params %v", keys)
+	}
+	if front := TunnelCoreParams(ActionReverseTunnel)[0]; front.Default != FrontForward || len(front.Options) != 2 || front.Order != 4 {
+		t.Errorf("front %+v", front)
+	}
+	if !IsCoreParam(ActionReverseTunnel, ParamHost) || !IsCoreParam(ActionReverseTunnel, ParamTo) || IsCoreParam(ActionReverseTunnel, "bind") ||
+		IsCoreParam(ActionReverseTunnel, ParamPort) {
+		t.Error("IsCoreParam")
+	}
+	reverse := BuildCommand{ID: "reverse_tunnel", Op: 17, Action: ActionReverseTunnel, Params: []FieldSpec{
 		{Key: "bind", Num: 1, Type: FieldString, Default: "0.0.0.0"},
 		{Key: "listen", Num: 2, Type: FieldInt, Required: true, Min: 0, Max: 65535},
 		{Key: "udp", Num: 5, Type: FieldBool, Default: false},
-		{Key: "host", Type: FieldString, Required: true},
-		{Key: "to", Type: FieldInt, Required: true, Min: 1, Max: 65535},
 		{Key: "timeout", Num: 3, Type: FieldDuration, Default: "10s"},
 		{Key: "max_streams", Num: 4, Type: FieldInt, Default: 256}}}
 	if err := validateResultAction(reverse); err != nil {
-		t.Errorf("reverse forward: %v", err)
+		t.Errorf("reverse tunnel: %v", err)
 	}
 	if err := validateCommandNumbers(reverse); err != nil {
-		t.Errorf("reverse forward's numbers: %v", err)
+		t.Errorf("reverse tunnel's numbers: %v", err)
 	}
-	numbered := reverse
-	numbered.Params = append([]FieldSpec{}, reverse.Params...)
-	numbered.Params[3].Num = 6
-	if err := validateCommandNumbers(numbered); err == nil || !strings.Contains(err.Error(), "takes no num") {
-		t.Errorf("a numbered destination: %v", err)
+	noUDP := reverse
+	noUDP.Params = append([]FieldSpec{}, reverse.Params[:2]...)
+	if err := validateResultAction(noUDP); err == nil || !strings.Contains(err.Error(), `"udp"`) {
+		t.Errorf("a reverse tunnel without udp: %v", err)
 	}
 	unnumbered := reverse
 	unnumbered.Params = append([]FieldSpec{}, reverse.Params...)
@@ -248,13 +251,9 @@ func TestReverseForwardAction(t *testing.T) {
 	if err := validateCommandNumbers(unnumbered); err == nil || !strings.Contains(err.Error(), `"bind"`) {
 		t.Errorf("an unnumbered bind: %v", err)
 	}
-	// A forward's host is the minion's, numbered as ever.
-	forward := BuildCommand{ID: "forward", Op: 10, Action: ActionPortForward, Params: []FieldSpec{{Key: "host", Type: FieldString}}}
-	if err := validateCommandNumbers(forward); err == nil {
-		t.Error("an unnumbered forward host taken")
-	}
-	wire := WireArgs(reverse.Params, map[string]any{"bind": "0.0.0.0", "listen": int64(8080), "udp": true, "host": "10.8.0.2",
-		"to": int64(4444), "timeout": int64(10000), "max_streams": int64(256)})
+	params := append(append([]FieldSpec{}, reverse.Params...), TunnelCoreParams(ActionReverseTunnel)...)
+	wire := WireArgs(params, map[string]any{"bind": "0.0.0.0", "listen": int64(8080), "udp": true, ParamFront: FrontForward,
+		ParamHost: "10.8.0.2", ParamTo: int64(4444), "timeout": int64(10000), "max_streams": int64(256)})
 	if len(wire) != 5 || wire[1] != "0.0.0.0" || wire[2] != int64(8080) {
 		t.Errorf("wire args %v", wire)
 	}
@@ -265,9 +264,108 @@ func TestReverseForwardAction(t *testing.T) {
 		t.Error("a text read as a bool")
 	}
 	for _, v := range wire {
-		if v == "10.8.0.2" || v == int64(4444) {
+		if v == "10.8.0.2" || v == int64(4444) || v == FrontForward {
 			t.Errorf("the destination went to the minion: %v", wire)
 		}
+	}
+}
+
+// Each tunnel action has its fronts, its default first; no other action
+// has any.
+func TestTunnelFronts(t *testing.T) {
+	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward" {
+		t.Errorf("tunnel: %v", f)
+	}
+	if f := TunnelFronts(ActionReverseTunnel); strings.Join(f, ",") != "forward,socks" {
+		t.Errorf("reverse tunnel: %v", f)
+	}
+	if TunnelFronts(ActionListDir) != nil || TunnelCoreParams(ActionListDir) != nil {
+		t.Error("list_dir has fronts")
+	}
+	// Each front's option says it, the default first.
+	for _, action := range TunnelActions() {
+		front := TunnelCoreParams(action)[0]
+		for i, f := range TunnelFronts(action) {
+			if front.Options[i].Value != f || front.Options[i].Label == "" {
+				t.Errorf("%s: option %d %+v, want %s", action, i, front.Options[i], f)
+			}
+		}
+	}
+}
+
+// A tunnel command says what it opens (TCP alone when it says nothing); no
+// other command says it, and nothing but tcp and udp, once each.
+func TestTunnelOpens(t *testing.T) {
+	targets := map[string]bool{}
+	tunnel := BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel}
+	if !tunnel.CanOpen(OpenTCP) || tunnel.CanOpen(OpenUDP) {
+		t.Error("a command that says nothing opens TCP alone")
+	}
+	tunnel.Opens = []string{OpenTCP, OpenUDP}
+	if !tunnel.CanOpen(OpenUDP) || tunnel.CanOpen("unix") {
+		t.Error("CanOpen")
+	}
+	if err := validateBuildCommand(tunnel, targets); err != nil {
+		t.Errorf("tcp and udp: %v", err)
+	}
+	for name, c := range map[string]struct {
+		cmd  BuildCommand
+		want string
+	}{
+		"not a tunnel": {BuildCommand{ID: "ls", Op: 4, Action: ActionListDir, Result: ResultDirListing,
+			Params: []FieldSpec{{Key: "path", Num: 1, Type: FieldString}}, Opens: []string{OpenTCP}}, "only a tunnel"},
+		"unknown":   {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{"unix"}}, `"unix" is not one`},
+		"duplicate": {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{OpenUDP, OpenUDP}}, "duplicate"},
+	} {
+		if err := validateBuildCommand(c.cmd, targets); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", name, err, c.want)
+		}
+	}
+}
+
+// An open is read strictly: a key past this version's is refused
+// (ErrTunnelUnsupported), never misread as a plain connect; one that does
+// not read or validate says why; both keep the task and stream to answer
+// with.
+func TestReadTunnel(t *testing.T) {
+	task := bytes.Repeat([]byte{7}, 16)
+	enc := func(m map[int]any) []byte {
+		t.Helper()
+		b, err := MarshalCBOR(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	it, err := ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 3, 3: "10.0.0.5", 4: 445, 5: 1024, 6: false}))
+	if err != nil || it.Host != "10.0.0.5" || it.Port != 445 || TunnelRoom(it.Room) != 1024 || !it.Answerable() {
+		t.Errorf("an open: %+v %v", it, err)
+	}
+	// A later version's: TLS to the destination, a source address.
+	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 4, 3: "10.0.0.5", 4: 443, 7: true, 8: "10.0.0.99"}))
+	if !errors.Is(err, ErrTunnelUnsupported) || !it.Answerable() || it.Stream != 4 || it.Host != "" {
+		t.Errorf("a later open: %+v %v", it, err)
+	}
+	// One that names a path, no host: it does not validate, and is
+	// answered.
+	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 5, 4: 1}))
+	if err == nil || errors.Is(err, ErrTunnelUnsupported) || !it.Answerable() {
+		t.Errorf("an open with no host: %+v %v", it, err)
+	}
+	// A port that is text: it does not read, and is still answered.
+	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 6, 3: "h", 4: "445"}))
+	if err == nil || !it.Answerable() {
+		t.Errorf("a text port: %+v %v", it, err)
+	}
+	// No task: not answerable.
+	if it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 2: 7, 3: "h", 4: 1})); err == nil || it.Answerable() {
+		t.Errorf("no task: %+v %v", it, err)
+	}
+	if _, err := ReadTunnel([]byte{0xff}); err == nil {
+		t.Error("garbage read")
+	}
+	if TunnelResultName(TunnelUnsupported) != "unsupported" {
+		t.Error("unsupported's name")
 	}
 }
 
@@ -306,9 +404,8 @@ func TestTunnelListen(t *testing.T) {
 }
 
 // stop_idle is every tunnel action's optional, core-only param: a command
-// may take it (a duration, no num) or leave it out, as factories built
-// before it did; one of another type, or numbered, is refused, and a task
-// never takes it to the minion.
+// may take it (a duration, no num) or leave it out; one of another type,
+// or numbered, is refused, and a task never takes it to the minion.
 func TestTunnelStopIdle(t *testing.T) {
 	for _, action := range TunnelActions() {
 		a, _ := KnownAction(action)
@@ -319,38 +416,37 @@ func TestTunnelStopIdle(t *testing.T) {
 	if IsCoreParam(ActionListDir, ParamStopIdle) {
 		t.Error("a list_dir's stop_idle is core's")
 	}
-	socks := BuildCommand{ID: "socks", Op: 9, Action: ActionSocksProxy, Params: []FieldSpec{
-		{Key: "port", Num: 1, Type: FieldInt, Default: 0},
+	tunnel := BuildCommand{ID: "tunnel", Op: 9, Action: ActionTunnel, Params: []FieldSpec{
 		{Key: ParamStopIdle, Type: FieldDuration, Default: "1h"},
 		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "10s"}}}
-	if err := validateResultAction(socks); err != nil {
+	if err := validateResultAction(tunnel); err != nil {
 		t.Errorf("with stop_idle: %v", err)
 	}
-	if err := validateCommandNumbers(socks); err != nil {
+	if err := validateCommandNumbers(tunnel); err != nil {
 		t.Errorf("with stop_idle, numbers: %v", err)
 	}
-	without := socks
-	without.Params = []FieldSpec{socks.Params[0], socks.Params[2]}
+	without := tunnel
+	without.Params = []FieldSpec{tunnel.Params[1]}
 	if err := validateResultAction(without); err != nil {
 		t.Errorf("without stop_idle: %v", err)
 	}
-	noDefault := socks
-	noDefault.Params = []FieldSpec{socks.Params[0], {Key: ParamStopIdle, Type: FieldDuration}}
+	noDefault := tunnel
+	noDefault.Params = []FieldSpec{{Key: ParamStopIdle, Type: FieldDuration}}
 	if err := validateResultAction(noDefault); err != nil {
 		t.Errorf("a stop_idle with no default: %v", err)
 	}
-	wrongType := socks
-	wrongType.Params = []FieldSpec{socks.Params[0], {Key: ParamStopIdle, Type: FieldInt, Default: 60}}
+	wrongType := tunnel
+	wrongType.Params = []FieldSpec{{Key: ParamStopIdle, Type: FieldInt, Default: 60}}
 	if err := validateResultAction(wrongType); err == nil || !strings.Contains(err.Error(), "or none") {
 		t.Errorf("an int stop_idle: %v", err)
 	}
-	numbered := socks
-	numbered.Params = []FieldSpec{socks.Params[0], {Key: ParamStopIdle, Num: 3, Type: FieldDuration, Default: "1h"}}
+	numbered := tunnel
+	numbered.Params = []FieldSpec{{Key: ParamStopIdle, Num: 3, Type: FieldDuration, Default: "1h"}}
 	if err := validateCommandNumbers(numbered); err == nil || !strings.Contains(err.Error(), "takes no num") {
 		t.Errorf("a numbered stop_idle: %v", err)
 	}
-	wire := WireArgs(socks.Params, map[string]any{"port": int64(0), ParamStopIdle: int64(3600000), "timeout": int64(10000)})
-	if len(wire) != 2 {
+	wire := WireArgs(tunnel.Params, map[string]any{ParamStopIdle: int64(3600000), "timeout": int64(10000)})
+	if len(wire) != 1 {
 		t.Errorf("stop_idle went to the minion: %v", wire)
 	}
 }

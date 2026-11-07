@@ -78,43 +78,43 @@ const (
 	// new connection. A command may take more (BOB's connect: for how long),
 	// each with a default.
 	ActionSwitchConnection = "switch_connection"
-	// ActionSocksProxy runs a tunnel with core's SOCKS proxy in front
-	// (tunnels.go): core gives port, the operational port it listens on for
-	// the task (0: any free one), which the minion needs nothing of. It has
-	// no result: the task runs while the tunnel is open, its streams going
-	// as tunnel items, and core shows it. A command may take more, each with
-	// a default, which only the minion reads (a connect's timeout, its
-	// max_streams).
-	ActionSocksProxy = "socks_proxy"
-	// ActionPortForward runs a tunnel with a port forward in front: core
-	// listens on port as for ActionSocksProxy, and opens each connection to
-	// it as a stream to host:to, which core reads and the minion needs
-	// nothing of (each stream's tunnel item names it). The same items, the
-	// same task, no result; more params, each with a default, the minion's.
-	ActionPortForward = "port_forward"
-	// ActionReversePortForward runs a tunnel the other way, as ssh -R
-	// does: the minion listens on its host at bind:listen (listen 0: any
-	// free port) and opens each connection that comes there as a stream,
-	// which core connects to host:to from its own network; with udp, it
-	// listens for datagrams, a stream for each address they come from,
-	// which core sends on to host:to. bind, listen and udp are the
-	// minion's, read from its task; host and to are core's alone
-	// (CommandAction.CoreParams): they carry no num, so the minion never
-	// learns where core sends what comes. The same items, the streams the
-	// minion's (tunnels.go); no result; more params, each with a default.
-	ActionReversePortForward = "reverse_port_forward"
+	// ActionTunnel lends the minion's host to streams core opens
+	// (tunnels.go): each a connection the minion makes to where its tunnel
+	// item says, or a UDP association. What core puts in front of them is
+	// the task's front (ParamFront, TunnelFronts): its SOCKS proxy, its
+	// HTTP proxy, or a port forward to one destination, on one of its
+	// operational ports. Core adds its own params to every command of the
+	// action (CommandAction.Adds: the front, the port, a forward's
+	// destination, the bandwidth cap), which carry no num: the minion
+	// needs nothing of them. A command declares what its minion reads (a
+	// connect's timeout, its max_streams), each with a default, and may
+	// take stop_idle. No result: the task runs while the tunnel is open,
+	// its streams going as tunnel items, and core shows it.
+	ActionTunnel = "tunnel"
+	// ActionReverseTunnel runs a tunnel the other way, as ssh -R does: the
+	// minion listens on its host at bind:listen (listen 0: any free port)
+	// and opens a stream for each connection that comes there; with udp,
+	// it listens for datagrams, a stream for each address they come from.
+	// What core does with each is the task's front: forward connects it to
+	// host:to from core's network (a UDP one's datagrams sent on there),
+	// socks reads a SOCKS5 request from it, behind a password core makes
+	// for the task, and connects where it asks. bind, listen and udp are
+	// the minion's, read from its task; the front, host and to are core's
+	// alone (CommandAction.Adds), so the minion never learns where core
+	// sends what comes. The same items, the streams the minion's
+	// (tunnels.go); no result; more params, each with a default.
+	ActionReverseTunnel = "reverse_tunnel"
 )
 
 // TunnelActions are the tunnel actions: a task of a command with one
-// carries streams as tunnel items, whatever core puts in front of its port
-// (SOCKS, a port forward) or the minion listens for (a reverse port
-// forward). Such a task holds none of the minion's max_tasks: it runs as
-// long as its tunnel is open, a minion's capability rather than its work,
-// and both sides count it out. Each may take stop_idle (ParamStopIdle), a
-// duration core alone reads: core stops the task once no stream has been
-// open for that long (absent or 0: never).
+// carries streams as tunnel items, whatever core puts in front of them.
+// Such a task holds none of the minion's max_tasks: it runs as long as its
+// tunnel is open, a minion's capability rather than its work, and both
+// sides count it out. Each may take stop_idle (ParamStopIdle), a duration
+// core alone reads: core stops the task once no stream has been open for
+// that long (absent or 0: never).
 func TunnelActions() []string {
-	return []string{ActionSocksProxy, ActionPortForward, ActionReversePortForward}
+	return []string{ActionTunnel, ActionReverseTunnel}
 }
 
 // ParamStopIdle is the tunnel actions' optional, core-only param: a
@@ -122,8 +122,99 @@ func TunnelActions() []string {
 // the task as Stop does; 0, or a command without it, never.
 const ParamStopIdle = "stop_idle"
 
+// The params core adds to every tunnel command (CommandAction.Adds): the
+// operator gives them as a tunnel starts, and the minion never sees them.
+const (
+	// ParamFront is what core puts in front of the tunnel's streams: one of
+	// its action's TunnelFronts, its first when none is given.
+	ParamFront = "front"
+	// ParamPort is a tunnel's operational port: 0 for any free one.
+	ParamPort = "port"
+	// ParamHost and ParamTo are a forward's destination: from the minion's
+	// host (a tunnel), or from core's network (a reverse tunnel).
+	ParamHost = "host"
+	ParamTo   = "to"
+	// ParamCap is the tunnel's bandwidth cap: bytes a second each way, over
+	// all of its streams together; 0 for none. Core changes it live.
+	ParamCap = "cap"
+)
+
+// Tunnel fronts: what core puts in front of a tunnel task's streams, the
+// operator's to pick as the task starts (ParamFront).
+const (
+	// FrontSOCKS: a tunnel's SOCKS proxy (5, 4 and 4a) on one of core's
+	// operational ports; a reverse tunnel's, a SOCKS5 proxy into core's
+	// network behind a password core makes for the task.
+	FrontSOCKS = "socks"
+	// FrontHTTP: a tunnel's HTTP proxy (CONNECT, and plain requests) on one
+	// of core's operational ports.
+	FrontHTTP = "http"
+	// FrontForward: every stream to one destination, host:to: from the
+	// minion's host (a tunnel), or from core's network (a reverse tunnel).
+	FrontForward = "forward"
+)
+
+// TunnelFronts are the fronts a tunnel action takes, the one a task that
+// names none gets first; nil for any other action.
+func TunnelFronts(action string) []string {
+	switch action {
+	case ActionTunnel:
+		return []string{FrontSOCKS, FrontHTTP, FrontForward}
+	case ActionReverseTunnel:
+		return []string{FrontForward, FrontSOCKS}
+	}
+	return nil
+}
+
+// What a tunnel command opens (BuildCommand.Opens).
+const (
+	// OpenTCP: TCP connections (a tunnel), or a TCP listener (a reverse
+	// tunnel).
+	OpenTCP = "tcp"
+	// OpenUDP: UDP associations (a tunnel's SOCKS UDP ASSOCIATE), or a UDP
+	// listener (a reverse tunnel's udp).
+	OpenUDP = "udp"
+)
+
+// opens are the kinds a tunnel command may say it opens.
+var opens = []string{OpenTCP, OpenUDP}
+
 // IsTunnelAction reports whether action is one of TunnelActions.
 func IsTunnelAction(action string) bool { return slices.Contains(TunnelActions(), action) }
+
+// TunnelCoreParams are the params core adds to every command of a tunnel
+// action (CommandAction.Adds), none for any other: a copy, for core to put
+// beside the command's own when it offers it.
+func TunnelCoreParams(action string) []FieldSpec {
+	return slices.Clone(actions[action].Adds)
+}
+
+// tunnelCoreParams are what core adds to a tunnel action's commands: the
+// front (fronts its options, the first the default), a tunnel's port, a
+// forward's destination, and the bandwidth cap. They carry no num. They
+// come first in a tunnel's form, after where a reverse tunnel listens
+// (its command's bind, listen and udp: orders 1 to 3), and the cap last;
+// a command's own params take orders from 10.
+func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
+	order, from := 0, "the minion's host"
+	if action == ActionReverseTunnel {
+		order, from = 3, "core's network"
+	}
+	next := func() int { order++; return order }
+	out := []FieldSpec{{Key: ParamFront, Type: FieldEnum, Label: "Front", Default: fronts[0].Value, Options: fronts, Order: next(),
+		Description: "What core puts in front of the tunnel."}}
+	if action == ActionTunnel {
+		out = append(out, FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
+			Description: "The operational port core listens on: 0 for any free one."})
+	}
+	return append(out,
+		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", MaxLength: MaxTunnelHost, Order: next(),
+			Description: "A forward's destination, reached from " + from + ": a name or an address."},
+		FieldSpec{Key: ParamTo, Type: FieldInt, Label: "Destination port", Min: 0, Max: 65535, Order: next(),
+			Description: "A forward's destination port."},
+		FieldSpec{Key: ParamCap, Type: FieldBytes, Label: "Bandwidth cap", Default: 0, Min: 0, Unit: "B/s", Order: 1000,
+			Description: "Bytes a second each way, over all of the tunnel's streams: 0 for none. It can be changed while the tunnel runs."})
+}
 
 // results are the results this version defines.
 var results = map[string]bool{
@@ -151,13 +242,19 @@ type CommandAction struct {
 	// without when it does not (a tunnel's stop_idle). An action gains
 	// params only so, so factories built before stay valid.
 	Optional map[string]FieldType
+	// Adds are params core adds to every command of the action, beside the
+	// command's own (a tunnel's front, port, destination and cap): a
+	// factory declares none of them, they carry no num, and core reads
+	// them alone.
+	Adds []FieldSpec
 }
 
-// IsCoreParam reports whether key is one of action's CoreParams: a param
-// with no num, which never goes to the minion.
+// IsCoreParam reports whether key is core's alone in action's commands:
+// one of its CoreParams, or a param core adds (Adds). It has no num, and
+// never goes to the minion.
 func IsCoreParam(action, key string) bool {
 	a, ok := actions[action]
-	return ok && slices.Contains(a.CoreParams, key)
+	return ok && (slices.Contains(a.CoreParams, key) || slices.ContainsFunc(a.Adds, func(p FieldSpec) bool { return p.Key == key }))
 }
 
 // actions are the actions this version defines.
@@ -173,12 +270,16 @@ var actions = map[string]CommandAction{
 	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
-	ActionSocksProxy: {Params: map[string]FieldType{"port": FieldInt}, CoreParams: []string{ParamStopIdle},
-		Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
-	ActionPortForward: {Params: map[string]FieldType{"port": FieldInt, "host": FieldString, "to": FieldInt},
-		CoreParams: []string{ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
-	ActionReversePortForward: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool, "host": FieldString,
-		"to": FieldInt}, CoreParams: []string{"host", "to", ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
+	ActionTunnel: {CoreParams: []string{ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration},
+		Adds: tunnelCoreParams(ActionTunnel, []EnumOption{
+			{Value: FrontSOCKS, Label: "SOCKS proxy", Description: "SOCKS5 (connect, UDP associate), SOCKS4 and 4a: each tool says where each connection goes."},
+			{Value: FrontHTTP, Label: "HTTP proxy", Description: "CONNECT, and plain requests: for the tools that speak no SOCKS."},
+			{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."}})},
+	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
+		CoreParams: []string{ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration},
+		Adds: tunnelCoreParams(ActionReverseTunnel, []EnumOption{
+			{Value: FrontForward, Label: "Reverse port forward", Description: "Core connects every connection to the destination."},
+			{Value: FrontSOCKS, Label: "Reverse SOCKS", Description: "A SOCKS5 proxy into core's network, behind a password core makes: TCP only."}})},
 }
 
 // KnownResult reports whether this version defines the result.
@@ -218,6 +319,9 @@ func validateResultAction(c BuildCommand) error {
 		}
 	}
 	for _, p := range c.Params {
+		if slices.ContainsFunc(spec.Adds, func(a FieldSpec) bool { return a.Key == p.Key }) {
+			return fmt.Errorf("param %q is core's: core adds it to every %s command, and a factory declares none", p.Key, c.Action)
+		}
 		_, own := spec.Params[p.Key]
 		_, optional := spec.Optional[p.Key]
 		if !own && !optional && p.Default == nil {
