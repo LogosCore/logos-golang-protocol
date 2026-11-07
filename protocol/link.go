@@ -99,9 +99,10 @@ const (
 //
 // A call and an open to an agentless kind carry Acting too, when the
 // session they go under has an identity a task made (a become): that task,
-// its command and args (credentials in place of ids, resolved at this call),
-// so a channel that keeps nothing between calls takes it up again on every
-// connection, as a minion would keep it. None for any other kind.
+// its command and args as its task item carried them (credentials in place
+// of ids, resolved when the task was queued), so a channel that keeps
+// nothing between calls takes it up again on every connection, as a minion
+// would keep it. None for any other kind.
 //
 // An open carries Request, Values, Deadline and Under: the id the minion
 // speaks under on the new connection, 16 bytes, its target's open session's
