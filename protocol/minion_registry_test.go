@@ -69,6 +69,7 @@ func TestRegistry(t *testing.T) {
 		{TunnelCloseItem{T: ItemTunnelClose, Task: id, Stream: 1, Reason: TunnelCloseReset, Msg: "m"}, 25, []uint64{0, 1, 2, 3, 4}},
 		{TunnelDatagramItem{T: ItemTunnelDatagram, Task: id, Stream: 1, Seq: 1, Host: "h", Port: 1, Data: id}, 26,
 			[]uint64{0, 1, 2, 3, 4, 5, 6}},
+		{TunnelListenItem{T: ItemTunnelListen, Task: id, Bound: "0.0.0.0:8080"}, 27, []uint64{0, 1, 2}},
 		{LinkActing{Task: id, Cmd: 1, Args: Args{1: 1}}, -1, []uint64{1, 2, 3}},
 		{FileOffer{Xfer: id, Name: "n", Size: 1, SHA256: id, Stream: true}, -1, []uint64{1, 2, 3, 4, 5}},
 		{LsPiece{ID: 1, Part: 1, Last: true, Path: "/", Sep: "/", Parent: "/", Entries: []LsEntry{entry},

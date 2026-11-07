@@ -91,15 +91,18 @@ const (
 	// the process's own (IdentityItem; minion → core).
 	ItemIdentity = 20
 	// Tunnels (tunnels.go): ItemTunnel opens a stream of a tunnel task
-	// (TunnelItem; core → minion), ItemTunnelReply answers it
-	// (TunnelReplyItem; minion → core); ItemTunnelData, ItemTunnelAck,
-	// ItemTunnelClose and ItemTunnelDatagram go both ways.
+	// (TunnelItem; core → minion, or minion → core in a reverse port
+	// forward), ItemTunnelReply answers it (TunnelReplyItem; the other
+	// way); ItemTunnelData, ItemTunnelAck, ItemTunnelClose and
+	// ItemTunnelDatagram go both ways; ItemTunnelListen says a reverse port
+	// forward's listener is up (TunnelListenItem; minion → core).
 	ItemTunnel         = 21
 	ItemTunnelReply    = 22
 	ItemTunnelData     = 23
 	ItemTunnelAck      = 24
 	ItemTunnelClose    = 25
 	ItemTunnelDatagram = 26
+	ItemTunnelListen   = 27
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -111,6 +114,7 @@ var itemNames = map[int]string{
 	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
 	ItemIdentity: "identity", ItemTunnel: "tunnel", ItemTunnelReply: "tunnel_reply", ItemTunnelData: "tunnel_data",
 	ItemTunnelAck: "tunnel_ack", ItemTunnelClose: "tunnel_close", ItemTunnelDatagram: "tunnel_datagram",
+	ItemTunnelListen: "tunnel_listen",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does

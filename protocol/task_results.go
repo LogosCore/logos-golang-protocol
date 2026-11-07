@@ -92,14 +92,35 @@ const (
 	// nothing of (each stream's tunnel item names it). The same items, the
 	// same task, no result; more params, each with a default, the minion's.
 	ActionPortForward = "port_forward"
+	// ActionReversePortForward runs a tunnel the other way, as ssh -R
+	// does: the minion listens on its host at bind:listen (listen 0: any
+	// free port) and opens each connection that comes there as a stream,
+	// which core connects to host:to from its own network; with udp, it
+	// listens for datagrams, a stream for each address they come from,
+	// which core sends on to host:to. bind, listen and udp are the
+	// minion's, read from its task; host and to are core's alone
+	// (CommandAction.CoreParams): they carry no num, so the minion never
+	// learns where core sends what comes. The same items, the streams the
+	// minion's (tunnels.go); no result; more params, each with a default.
+	ActionReversePortForward = "reverse_port_forward"
 )
 
 // TunnelActions are the tunnel actions: a task of a command with one
 // carries streams as tunnel items, whatever core puts in front of its port
-// (SOCKS, a port forward). Such a task holds none of the minion's
-// max_tasks: it runs as long as its tunnel is open, a minion's capability
-// rather than its work, and both sides count it out.
-func TunnelActions() []string { return []string{ActionSocksProxy, ActionPortForward} }
+// (SOCKS, a port forward) or the minion listens for (a reverse port
+// forward). Such a task holds none of the minion's max_tasks: it runs as
+// long as its tunnel is open, a minion's capability rather than its work,
+// and both sides count it out. Each may take stop_idle (ParamStopIdle), a
+// duration core alone reads: core stops the task once no stream has been
+// open for that long (absent or 0: never).
+func TunnelActions() []string {
+	return []string{ActionSocksProxy, ActionPortForward, ActionReversePortForward}
+}
+
+// ParamStopIdle is the tunnel actions' optional, core-only param: a
+// duration (FieldDuration) after which, with no stream open, core stops
+// the task as Stop does; 0, or a command without it, never.
+const ParamStopIdle = "stop_idle"
 
 // IsTunnelAction reports whether action is one of TunnelActions.
 func IsTunnelAction(action string) bool { return slices.Contains(TunnelActions(), action) }
@@ -121,6 +142,22 @@ var results = map[string]bool{
 type CommandAction struct {
 	Params map[string]FieldType
 	Result string
+	// CoreParams are the params that are core's alone: they carry no num,
+	// so a task never takes them to the minion (a reverse port forward's
+	// destination, a tunnel's stop_idle).
+	CoreParams []string
+	// Optional are params a command of the action may take or leave out,
+	// each of its type: core reads one when the command has it, and does
+	// without when it does not (a tunnel's stop_idle). An action gains
+	// params only so, so factories built before stay valid.
+	Optional map[string]FieldType
+}
+
+// IsCoreParam reports whether key is one of action's CoreParams: a param
+// with no num, which never goes to the minion.
+func IsCoreParam(action, key string) bool {
+	a, ok := actions[action]
+	return ok && slices.Contains(a.CoreParams, key)
 }
 
 // actions are the actions this version defines.
@@ -136,8 +173,12 @@ var actions = map[string]CommandAction{
 	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
-	ActionSocksProxy:       {Params: map[string]FieldType{"port": FieldInt}},
-	ActionPortForward:      {Params: map[string]FieldType{"port": FieldInt, "host": FieldString, "to": FieldInt}},
+	ActionSocksProxy: {Params: map[string]FieldType{"port": FieldInt}, CoreParams: []string{ParamStopIdle},
+		Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
+	ActionPortForward: {Params: map[string]FieldType{"port": FieldInt, "host": FieldString, "to": FieldInt},
+		CoreParams: []string{ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
+	ActionReversePortForward: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool, "host": FieldString,
+		"to": FieldInt}, CoreParams: []string{"host", "to", ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration}},
 }
 
 // KnownResult reports whether this version defines the result.
@@ -150,9 +191,10 @@ func KnownAction(id string) (CommandAction, bool) {
 }
 
 // validateResultAction checks a command's result and action: each one this
-// version defines; the action's params taken, of their types; every other
-// param with a default, so core can run the command with the action's
-// params alone; and the result the action needs.
+// version defines; the action's params taken, of their types; its optional
+// ones, when taken, of theirs; every other param with a default, so core
+// can run the command with the action's params alone; and the result the
+// action needs.
 func validateResultAction(c BuildCommand) error {
 	if c.Result != "" && !results[c.Result] {
 		return fmt.Errorf("result %q is not one core knows (%s)", c.Result, strings.Join(keysOf(results), ", "))
@@ -170,8 +212,15 @@ func validateResultAction(c BuildCommand) error {
 			return fmt.Errorf("action %q takes a %s param %q", c.Action, spec.Params[k], k)
 		}
 	}
+	for _, k := range keysOf(spec.Optional) {
+		if i := slices.IndexFunc(c.Params, func(p FieldSpec) bool { return p.Key == k }); i >= 0 && c.Params[i].Type != spec.Optional[k] {
+			return fmt.Errorf("action %q takes a %s param %q, or none", c.Action, spec.Optional[k], k)
+		}
+	}
 	for _, p := range c.Params {
-		if _, own := spec.Params[p.Key]; !own && p.Default == nil {
+		_, own := spec.Params[p.Key]
+		_, optional := spec.Optional[p.Key]
+		if !own && !optional && p.Default == nil {
 			return fmt.Errorf("param %q needs a default: core runs a %s command with the action's params alone", p.Key, c.Action)
 		}
 	}

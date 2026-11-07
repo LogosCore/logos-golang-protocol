@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"time"
 	"unicode/utf8"
 )
 
@@ -14,12 +16,24 @@ import (
 // connects (or opens a UDP socket) and each side relays what its end sends.
 // Core puts what the operator's tools speak in front of it (a SOCKS proxy,
 // a port forward); the minion opens, relays and closes streams, nothing
-// more.
+// more. A reverse port forward (ActionReversePortForward) goes the other
+// way: the minion listens on its host, says where with a tunnel_listen,
+// and opens a stream for each connection that comes there; core connects
+// each to the task's destination, which the minion never learns. A UDP
+// one listens for datagrams: a stream for each address they come from (a
+// udp tunnel naming it), its datagrams going as tunnel_datagram items, core
+// sending them on from a socket of the stream's own, and the stream ending
+// once it idled TunnelUDPIdle.
 //
-// Every item names its task and the stream in it: a number core gives from
-// 1, never reused within the task. Each is safe to send again:
+// Every item names its task and the stream in it: a number the side that
+// opens it gives from 1, never reused within the task. Core opens a SOCKS
+// proxy's and a port forward's streams (tunnel, core → minion;
+// tunnel_reply, minion → core), the minion a reverse port forward's
+// (tunnel, minion → core, from the address that connected; tunnel_reply,
+// core → minion, with no Bound and no Msg: core says nothing of its side).
+// A task's streams are all one side's. Each item is safe to send again:
 //
-//   - tunnel for a stream the minion has: its tunnel_reply again.
+//   - tunnel for a stream its receiver has: its tunnel_reply again.
 //   - tunnel_data: each direction is a byte stream from 0, and the eof takes
 //     one place after the last byte, as TCP's FIN does. A receiver keeps an
 //     item only when its Off is where it has the stream (its next), so one
@@ -31,7 +45,9 @@ import (
 //   - tunnel_close: the stream is over; one for a stream gone is nothing.
 //     An item about a stream its receiver does not have (other than a
 //     close) is answered with tunnel_close TunnelCloseUnknown; a tunnel for
-//     a task the minion does not run as a tunnel, with TunnelCloseTaskEnded.
+//     a task its receiver does not run as a tunnel whose streams the sender
+//     opens, with TunnelCloseTaskEnded.
+//   - tunnel_listen: the task's listener, again; it changes nothing.
 //   - tunnel_datagram: a receiver takes one only when its Seq is above the
 //     last it took on the stream; there are no acks: as UDP is, one that
 //     does not fit, or finds the other side's queue full, is dropped.
@@ -58,37 +74,45 @@ const (
 	MaxTunnelMsg = 256
 	// MaxTunnelDatagram is the largest datagram payload.
 	MaxTunnelDatagram = 65535
+	// TunnelUDPIdle ends a UDP reverse port forward's stream with no
+	// datagram either way for that long: the minion closes it (done), and
+	// core, a minute later still, as a backstop.
+	TunnelUDPIdle = 2 * time.Minute
 )
 
-// TunnelItem opens a stream (core → minion): a TCP connection to Host:Port
+// TunnelItem opens a stream. Core → minion: a TCP connection to Host:Port
 // from the minion's host, or (UDP) a UDP association, a socket the minion
-// opens for the datagrams core sends through it.
+// opens for the datagrams core sends through it. Minion → core, in a
+// reverse port forward: a connection that came to the minion's listener
+// from Host:Port, which core connects to the task's destination.
 type TunnelItem struct {
 	T int `cbor:"0,keyasint"`
-	// Task is the tunnel task (16 bytes); Stream its number in the task.
+	// Task is the tunnel task (16 bytes); Stream its number in the task,
+	// its sender's.
 	Task   []byte `cbor:"1,keyasint"`
 	Stream uint64 `cbor:"2,keyasint"`
 	// Host is a name, which the minion resolves on its host (so internal
 	// names work), or an IPv4 or IPv6 address; Port 1 to 65535. Neither for
-	// a UDP association.
+	// a UDP association core opens. From the minion: the address that
+	// connected, or that a UDP stream's datagrams come from.
 	Host string `cbor:"3,keyasint,omitempty"`
 	Port uint64 `cbor:"4,keyasint,omitempty"`
-	// Room is what core takes of the stream past an ack (its window):
-	// DefaultTunnelRoom when nil.
+	// Room is what the sender takes of the stream past an ack (its
+	// window): DefaultTunnelRoom when nil.
 	Room *uint64 `cbor:"5,keyasint,omitempty"`
 	// UDP: a UDP association, not a TCP connection.
 	UDP bool `cbor:"6,keyasint,omitempty"`
 }
 
-// Validate checks the task, the stream, the destination (none for UDP) and
-// the window.
+// Validate checks the task, the stream, the address (for UDP none, or a
+// reverse port forward's source) and the window.
 func (t TunnelItem) Validate() error {
 	if err := tunnelStream("tunnel", t.Task, t.Stream); err != nil {
 		return err
 	}
 	if t.UDP {
-		if t.Host != "" || t.Port != 0 {
-			return errors.New("tunnel: a udp association names no host or port")
+		if (t.Host != "" || t.Port != 0) && tunnelPeer("tunnel", t.Host, t.Port) != nil {
+			return errors.New("tunnel: a udp stream names no address, or a whole one: host and port")
 		}
 	} else if err := tunnelPeer("tunnel", t.Host, t.Port); err != nil {
 		return err
@@ -96,7 +120,9 @@ func (t TunnelItem) Validate() error {
 	return tunnelRoom("tunnel", t.Room)
 }
 
-// TunnelReplyItem answers a tunnel (minion → core): open, or why not.
+// TunnelReplyItem answers a tunnel: open, or why not. Minion → core for
+// the streams core opens; core → minion for a reverse port forward's, with
+// no Bound and no Msg (core says nothing of its side).
 type TunnelReplyItem struct {
 	T      int    `cbor:"0,keyasint"`
 	Task   []byte `cbor:"1,keyasint"`
@@ -108,7 +134,7 @@ type TunnelReplyItem struct {
 	// net.JoinHostPort writes it), when open: the address the stream leaves
 	// the host from.
 	Bound string `cbor:"4,keyasint,omitempty"`
-	// Room is what the minion takes of the stream past an ack:
+	// Room is what the replier takes of the stream past an ack:
 	// DefaultTunnelRoom when nil.
 	Room *uint64 `cbor:"5,keyasint,omitempty"`
 	// Msg says why, for a person, when not open.
@@ -281,7 +307,9 @@ func (c TunnelCloseItem) Validate() error {
 
 // TunnelDatagramItem is one datagram of a UDP association (both ways): core
 // → minion to Host:Port, the destination; minion → core from Host:Port, the
-// source.
+// source. In a UDP reverse port forward the stream's source is both: the
+// minion's from it, core's to it (the minion sends them from its
+// listener).
 type TunnelDatagramItem struct {
 	T      int    `cbor:"0,keyasint"`
 	Task   []byte `cbor:"1,keyasint"`
@@ -308,6 +336,45 @@ func (d TunnelDatagramItem) Validate() error {
 		return fmt.Errorf("tunnel_datagram: data of %d bytes is over %d", len(d.Data), MaxTunnelDatagram)
 	}
 	return nil
+}
+
+// TunnelListenItem says a reverse port forward's listener is up (minion →
+// core): Bound, the address the minion listens at, "ip:port" (as
+// net.JoinHostPort writes it). Sent as the task starts; again, it changes
+// nothing. A minion whose listener does not open ends the task, saying why,
+// and sends none.
+type TunnelListenItem struct {
+	T     int    `cbor:"0,keyasint"`
+	Task  []byte `cbor:"1,keyasint"`
+	Bound string `cbor:"2,keyasint"`
+}
+
+// Validate checks the task and the address.
+func (l TunnelListenItem) Validate() error {
+	if len(l.Task) != 16 {
+		return errors.New("tunnel_listen: task is 16 bytes")
+	}
+	if len(l.Bound) > MaxTunnelBound {
+		return fmt.Errorf("tunnel_listen: bound is %d bytes at most", MaxTunnelBound)
+	}
+	if host, port, err := net.SplitHostPort(l.Bound); err != nil || host == "" || port == "" {
+		return errors.New("tunnel_listen: bound is the address it listens at, ip:port")
+	}
+	return nil
+}
+
+// TunnelListen checks where a reverse port forward listens: bind, an
+// address of the minion's host (0.0.0.0 or :: for all of them) or a name it
+// resolves there, and listen, a port from 1 to 65535, or 0 for any free
+// one.
+func TunnelListen(bind string, listen int64) error {
+	switch {
+	case listen < 0 || listen > 65535:
+		return errors.New("listen: a port from 0 (any free one) to 65535")
+	case bind == "":
+		return errors.New("bind: an address of the minion's host (0.0.0.0 for all of them)")
+	}
+	return tunnelPeer("bind", bind, 1)
 }
 
 // TunnelRoom is a window as an opening item says it: DefaultTunnelRoom when

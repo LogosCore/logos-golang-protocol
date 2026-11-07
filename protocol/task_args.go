@@ -142,6 +142,13 @@ func WireArgs(params []FieldSpec, args map[string]any) Args {
 	return out
 }
 
+// ArgBool is a task's bool arg: by number in a task's Args, or by key in
+// args TaskArgs made.
+func ArgBool[K comparable](args map[K]any, key K) (bool, bool) {
+	b, ok := args[key].(bool)
+	return b, ok
+}
+
 // ArgString is a task's text arg (string, url, secret, enum): by number in
 // a task's Args, or by key in args TaskArgs made.
 func ArgString[K comparable](args map[K]any, key K) (string, bool) {
