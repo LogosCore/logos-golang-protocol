@@ -58,6 +58,12 @@ import (
 //   - tunnel_datagram: a receiver takes one only when its Seq is above the
 //     last it took on the stream; there are no acks: as UDP is, one that
 //     does not fit, or finds the other side's queue full, is dropped.
+//   - tunnel_ctl: in order and none lost, as a stream's bytes are: each
+//     direction numbers its ctls from 0, a receiver takes one only when its
+//     Seq is the next it expects and acks with a tunnel_ack's Ctl; one
+//     below is a resend (acked again), one above waits for its sender to
+//     send again from the ack. A side ends a stream done only once its
+//     ctls are acked, and sends a process's exit before its eof.
 //
 // A stream is over when both directions reached their eof and each side has
 // the other's: the side that sees it sends tunnel_close TunnelCloseDone and
@@ -85,13 +91,23 @@ const (
 	// datagram either way for that long: the minion closes it (done), and
 	// core, a minute later still, as a backstop.
 	TunnelUDPIdle = 2 * time.Minute
-	// MaxTunnelPath bounds a unix socket's path or a named pipe's name.
+	// MaxTunnelPath bounds a unix socket's path, a named pipe's name or a
+	// process's program.
 	MaxTunnelPath = 1024
+	// MaxTunnelArgs bounds a process's args: so many at most, MaxTunnelArgsBytes
+	// together.
+	MaxTunnelArgs      = 64
+	MaxTunnelArgsBytes = 8 << 10
+	// MaxTunnelTerm bounds a terminal's rows and its columns.
+	MaxTunnelTerm = 1000
+	// TunnelAcceptWait is how long an accept waits for its connection: none
+	// in that time, and the minion closes the stream (reset).
+	TunnelAcceptWait = 2 * time.Minute
 )
 
 // What an open opens (TunnelItem.Kind): a TCP connection when it says none
 // (a UDP association by its UDP), else a unix socket or a named pipe, to
-// its Path.
+// its Path, a process, or a listener for one connection.
 const (
 	// TunnelKindUnix: a unix domain socket, a path ("/var/run/docker.sock")
 	// or an abstract name ("@name"); Linux's and Windows' alike.
@@ -99,6 +115,22 @@ const (
 	// TunnelKindPipe: a Windows named pipe, "\\.\pipe\name" or another
 	// host's "\\host\pipe\name" (over SMB, as the minion's user).
 	TunnelKindPipe = 2
+	// TunnelKindProcess: a program run on the minion's host, its Path
+	// (resolved on the host's PATH; none, the host's shell: $SHELL or
+	// /bin/sh, %ComSpec%), with its Args; with Rows and Cols, in a
+	// terminal of that size (a PTY, a ConPTY; stderr merged into the
+	// bytes, as a terminal shows it), else on pipes (stderr merged too). A
+	// host that has no terminal to give runs it on pipes, and its reply
+	// says so (TunnelReplyItem.Terminal). The stream's bytes are the
+	// terminal's; tunnel_ctl resizes it and signals the process, and says
+	// its exit; the stream's close hangs it up.
+	TunnelKindProcess = 3
+	// TunnelKindAccept: the minion listens at Host:Port (an address of its
+	// host, 0.0.0.0 or :: for all of them; port 0 for any free one) for one
+	// connection, SOCKS5's BIND: its reply says where it listens, a
+	// tunnel_ctl who came (within TunnelAcceptWait), then the stream is
+	// that connection's.
+	TunnelKindAccept = 4
 )
 
 // TunnelPathKind is the kind of open a path names: a named pipe when it
@@ -145,32 +177,64 @@ type TunnelItem struct {
 	// only where its command opens it (OpenSource, OpenTLS).
 	Source string `cbor:"9,keyasint,omitempty"`
 	TLS    bool   `cbor:"10,keyasint,omitempty"`
+	// Args are a process's args, past its program; Rows and Cols the
+	// terminal's size it runs in, both or neither (none: on pipes).
+	Args []string `cbor:"11,keyasint,omitempty"`
+	Rows uint64   `cbor:"12,keyasint,omitempty"`
+	Cols uint64   `cbor:"13,keyasint,omitempty"`
 }
 
-// Validate checks the task, the stream, the address (for UDP none, or a
-// reverse port forward's source; for a unix socket or a pipe, its path),
+// Validate checks the task, the stream, what it opens (an address: for UDP
+// none, or a reverse port forward's source; a unix socket's or a pipe's
+// path; a process's program, args and terminal; where an accept listens),
 // its source and TLS (a TCP connection's alone) and the window.
 func (t TunnelItem) Validate() error {
 	if err := tunnelStream("tunnel", t.Task, t.Stream); err != nil {
 		return err
 	}
 	switch {
-	case t.Kind < 0 || t.Kind > TunnelKindPipe:
+	case t.Kind < 0 || t.Kind > TunnelKindAccept:
 		return fmt.Errorf("tunnel: kind %d is not one this version opens", t.Kind)
-	case t.Kind != 0 && (t.Host != "" || t.Port != 0 || t.UDP):
-		return errors.New("tunnel: a unix socket or a pipe names its path, no host, port or udp")
-	case t.Kind == 0 && t.Path != "":
-		return errors.New("tunnel: a path names a unix socket's or a pipe's, with its kind")
+	case t.Kind != 0 && t.UDP:
+		return errors.New("tunnel: udp is a host and port's, with no kind")
 	case t.Source != "" && net.ParseIP(t.Source) == nil:
 		return errors.New("tunnel: source is an address of the minion's host, an IP")
 	case (t.Source != "" || t.TLS) && (t.Kind != 0 || t.UDP):
 		return errors.New("tunnel: source and tls are a TCP connection's")
+	case t.Kind != TunnelKindProcess && (len(t.Args) > 0 || t.Rows != 0 || t.Cols != 0):
+		return errors.New("tunnel: args and a terminal's size are a process's")
 	}
-	if t.Kind != 0 {
+	switch t.Kind {
+	case TunnelKindUnix, TunnelKindPipe:
+		if t.Host != "" || t.Port != 0 {
+			return errors.New("tunnel: a unix socket or a pipe names its path, no host or port")
+		}
 		if err := TunnelPath(t.Kind, t.Path); err != nil {
 			return err
 		}
 		return tunnelRoom("tunnel", t.Room)
+	case TunnelKindProcess:
+		if t.Host != "" || t.Port != 0 {
+			return errors.New("tunnel: a process names its program, no host or port")
+		}
+		if err := TunnelProcess(t.Path, t.Args, t.Rows, t.Cols); err != nil {
+			return err
+		}
+		return tunnelRoom("tunnel", t.Room)
+	case TunnelKindAccept:
+		if t.Path != "" {
+			return errors.New("tunnel: an accept names where it listens, no path")
+		}
+		if t.Port > 65535 {
+			return errors.New("tunnel: an accept listens on a port from 0 (any free one) to 65535")
+		}
+		if err := TunnelListen(t.Host, int64(t.Port)); err != nil {
+			return fmt.Errorf("tunnel: an accept's %w", err)
+		}
+		return tunnelRoom("tunnel", t.Room)
+	}
+	if t.Path != "" {
+		return errors.New("tunnel: a path names a unix socket's, a pipe's or a program, with its kind")
 	}
 	if t.UDP {
 		if (t.Host != "" || t.Port != 0) && tunnelPeer("tunnel", t.Host, t.Port) != nil {
@@ -210,9 +274,96 @@ func TunnelPath(kind int, path string) error {
 	return nil
 }
 
+// TunnelProcess checks a process's open: its program (none: the host's
+// shell) printable UTF-8 of MaxTunnelPath bytes at most; its args, past a
+// program alone, at most MaxTunnelArgs of MaxTunnelArgsBytes together,
+// UTF-8 with no NUL; and its terminal, rows and cols both or neither, 1 to
+// MaxTunnelTerm each.
+func TunnelProcess(program string, args []string, rows, cols uint64) error {
+	switch {
+	case len(program) > MaxTunnelPath:
+		return fmt.Errorf("tunnel: a program is %d bytes at most", MaxTunnelPath)
+	case !utf8.ValidString(program):
+		return errors.New("tunnel: a program is UTF-8")
+	case strings.ContainsFunc(program, func(r rune) bool { return r < 0x20 || r == 0x7f }):
+		return errors.New("tunnel: a program has a control character")
+	case program == "" && len(args) > 0:
+		return errors.New("tunnel: args go with a program, not the host's shell")
+	case len(args) > MaxTunnelArgs:
+		return fmt.Errorf("tunnel: %d args at most", MaxTunnelArgs)
+	case (rows == 0) != (cols == 0):
+		return errors.New("tunnel: a terminal has rows and cols, or there is none")
+	case rows > MaxTunnelTerm || cols > MaxTunnelTerm:
+		return fmt.Errorf("tunnel: a terminal is %d rows and cols at most", MaxTunnelTerm)
+	}
+	n := 0
+	for _, a := range args {
+		n += len(a)
+		if !utf8.ValidString(a) || strings.ContainsRune(a, 0) {
+			return errors.New("tunnel: an arg is UTF-8 with no NUL")
+		}
+	}
+	if n > MaxTunnelArgsBytes {
+		return fmt.Errorf("tunnel: args are %d bytes at most together", MaxTunnelArgsBytes)
+	}
+	return nil
+}
+
+// TunnelArgs splits a command line into args, as a POSIX shell's words are
+// (no expansions): spaces apart, 'single' quotes as they are, "double"
+// quotes and a backslash escaping the next character. Core splits the
+// operator's args param with it.
+func TunnelArgs(line string) ([]string, error) {
+	var args []string
+	var cur strings.Builder
+	in, quote, esc := false, rune(0), false
+	for _, r := range line {
+		switch {
+		case esc:
+			cur.WriteRune(r)
+			esc, in = false, true
+		case quote == '\'':
+			if r == '\'' {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\\' && quote != '\'':
+			esc, in = true, true
+		case quote == '"':
+			if r == '"' {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote, in = r, true
+		case r == ' ' || r == '\t' || r == '\n':
+			if in {
+				args = append(args, cur.String())
+				cur.Reset()
+				in = false
+			}
+		default:
+			cur.WriteRune(r)
+			in = true
+		}
+	}
+	switch {
+	case esc:
+		return nil, errors.New("args: a backslash at the end")
+	case quote != 0:
+		return nil, errors.New("args: a quote not closed")
+	}
+	if in {
+		args = append(args, cur.String())
+	}
+	return args, nil
+}
+
 // tunnelKeys is the highest key of a tunnel item this version knows: an
 // open with a key past it is a later version's, which ReadTunnel refuses.
-const tunnelKeys = 10
+const tunnelKeys = 13
 
 // ErrTunnelUnsupported: an open (a tunnel item) with a key this version
 // does not know. Ignoring it would misread a later version's open (TLS to
@@ -273,6 +424,9 @@ type TunnelReplyItem struct {
 	Room *uint64 `cbor:"5,keyasint,omitempty"`
 	// Msg says why, for a person, when not open.
 	Msg string `cbor:"6,keyasint,omitempty"`
+	// Terminal: a process's open runs in a terminal (it asked one, and the
+	// host gave it); false, on pipes.
+	Terminal bool `cbor:"7,keyasint,omitempty"`
 }
 
 // Tunnel results: a tunnel_reply's Result.
@@ -302,12 +456,15 @@ const (
 	// TunnelDenied: the minion may not open it (the socket's or the pipe's
 	// rights, a remote pipe's logon).
 	TunnelDenied = 9
+	// TunnelInUse: an accept's address is taken.
+	TunnelInUse = 10
 )
 
 var tunnelResultNames = map[int]string{
 	TunnelOpen: "open", TunnelRefused: "refused", TunnelHostUnreachable: "host_unreachable",
 	TunnelNetUnreachable: "net_unreachable", TunnelTimedOut: "timed_out", TunnelNotAllowed: "not_allowed",
 	TunnelFailed: "failed", TunnelUnsupported: "unsupported", TunnelNotFound: "not_found", TunnelDenied: "denied",
+	TunnelInUse: "in_use",
 }
 
 // TunnelResultName is a result's name, for people: "result 9" for one this
@@ -387,6 +544,9 @@ type TunnelAckItem struct {
 	// Room is what the sender takes past Next; unchanged when nil. 0 stops
 	// the other side until an ack gives room again.
 	Room *uint64 `cbor:"4,keyasint,omitempty"`
+	// Ctl is the next tunnel_ctl Seq the sender takes from the other side:
+	// every one before it taken. A receiver keeps the highest it saw.
+	Ctl uint64 `cbor:"5,keyasint,omitempty"`
 }
 
 // Validate checks the task, the stream and the window.
@@ -519,6 +679,77 @@ func TunnelListen(bind string, listen int64) error {
 		return errors.New("bind: an address of the minion's host (0.0.0.0 for all of them)")
 	}
 	return tunnelPeer("bind", bind, 1)
+}
+
+// TunnelCtlItem says what a stream carries besides its bytes (both ways):
+// toward the minion, a process's new terminal size and a signal; from it,
+// the process's exit and an accept's connection. Numbered and acked
+// (tunnel_ack Ctl): in order, none lost.
+type TunnelCtlItem struct {
+	T      int    `cbor:"0,keyasint"`
+	Task   []byte `cbor:"1,keyasint"`
+	Stream uint64 `cbor:"2,keyasint"`
+	// Seq is its number in its direction, from 0.
+	Seq uint64 `cbor:"3,keyasint"`
+	// Rows and Cols: the terminal's new size (core → minion), both or
+	// neither.
+	Rows uint64 `cbor:"4,keyasint,omitempty"`
+	Cols uint64 `cbor:"5,keyasint,omitempty"`
+	// Signal for the process (core → minion): TunnelSignalInterrupt, ...;
+	// one the minion does not know it ignores.
+	Signal int `cbor:"6,keyasint,omitempty"`
+	// Exit is the process's exit code (minion → core), sent before the
+	// stream's eof: one a signal ended is 128 and its number, as a shell
+	// says it; a Windows one its code (a uint32).
+	Exit *int64 `cbor:"7,keyasint,omitempty"`
+	// Host and Port: who connected to an accept (minion → core).
+	Host string `cbor:"8,keyasint,omitempty"`
+	Port uint64 `cbor:"9,keyasint,omitempty"`
+}
+
+// Signals a tunnel_ctl sends a process: the minion's host's own for each
+// (SIGINT, SIGTERM, SIGKILL to its process group; on Windows a Ctrl-C to
+// its console, then for the others TerminateProcess).
+const (
+	TunnelSignalInterrupt = 1
+	TunnelSignalTerminate = 2
+	TunnelSignalKill      = 3
+)
+
+var tunnelSignalNames = map[int]string{
+	TunnelSignalInterrupt: "interrupt", TunnelSignalTerminate: "terminate", TunnelSignalKill: "kill",
+}
+
+// TunnelSignalName is a signal's name, for people: "signal 9" for one this
+// version does not know.
+func TunnelSignalName(s int) string {
+	if n, ok := tunnelSignalNames[s]; ok {
+		return n
+	}
+	return fmt.Sprintf("signal %d", s)
+}
+
+// Validate checks the task, the stream, and that the item says something
+// it may: a terminal's size (rows and cols, 1 to MaxTunnelTerm), a signal,
+// an exit, who came (a host and a port).
+func (c TunnelCtlItem) Validate() error {
+	if err := tunnelStream("tunnel_ctl", c.Task, c.Stream); err != nil {
+		return err
+	}
+	switch {
+	case (c.Rows == 0) != (c.Cols == 0):
+		return errors.New("tunnel_ctl: a terminal's size is rows and cols")
+	case c.Rows > MaxTunnelTerm || c.Cols > MaxTunnelTerm:
+		return fmt.Errorf("tunnel_ctl: a terminal is %d rows and cols at most", MaxTunnelTerm)
+	case c.Signal < 0:
+		return errors.New("tunnel_ctl: a signal is 1 or more")
+	case c.Rows == 0 && c.Signal == 0 && c.Exit == nil && c.Host == "" && c.Port == 0:
+		return errors.New("tunnel_ctl: a size, a signal, an exit or who came")
+	}
+	if c.Host != "" || c.Port != 0 {
+		return tunnelPeer("tunnel_ctl", c.Host, c.Port)
+	}
+	return nil
 }
 
 // TunnelRoom is a window as an opening item says it: DefaultTunnelRoom when

@@ -95,7 +95,9 @@ const (
 	// forward), ItemTunnelReply answers it (TunnelReplyItem; the other
 	// way); ItemTunnelData, ItemTunnelAck, ItemTunnelClose and
 	// ItemTunnelDatagram go both ways; ItemTunnelListen says a reverse port
-	// forward's listener is up (TunnelListenItem; minion → core).
+	// forward's listener is up (TunnelListenItem; minion → core);
+	// ItemTunnelCtl says what a stream carries besides bytes (TunnelCtlItem,
+	// both ways: a terminal's size, a signal, an exit code, who came).
 	ItemTunnel         = 21
 	ItemTunnelReply    = 22
 	ItemTunnelData     = 23
@@ -103,6 +105,7 @@ const (
 	ItemTunnelClose    = 25
 	ItemTunnelDatagram = 26
 	ItemTunnelListen   = 27
+	ItemTunnelCtl      = 28
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -114,7 +117,7 @@ var itemNames = map[int]string{
 	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
 	ItemIdentity: "identity", ItemTunnel: "tunnel", ItemTunnelReply: "tunnel_reply", ItemTunnelData: "tunnel_data",
 	ItemTunnelAck: "tunnel_ack", ItemTunnelClose: "tunnel_close", ItemTunnelDatagram: "tunnel_datagram",
-	ItemTunnelListen: "tunnel_listen",
+	ItemTunnelListen: "tunnel_listen", ItemTunnelCtl: "tunnel_ctl",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does

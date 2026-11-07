@@ -144,6 +144,14 @@ const (
 	// connections go from; ParamTLS, TLS to a forward's destination.
 	ParamSource = "source"
 	ParamTLS    = "tls"
+	// ParamProgram and ParamArgs are a terminal's program (none: the
+	// host's shell) and its args, a command line core splits
+	// (TunnelArgs); ParamRows and ParamCols its size on the raw port (the
+	// web terminal says its own).
+	ParamProgram = "program"
+	ParamArgs    = "args"
+	ParamRows    = "rows"
+	ParamCols    = "cols"
 )
 
 // Tunnel fronts: what core puts in front of a tunnel task's streams, the
@@ -159,6 +167,10 @@ const (
 	// FrontForward: every stream to one destination, host:to: from the
 	// minion's host (a tunnel), or from core's network (a reverse tunnel).
 	FrontForward = "forward"
+	// FrontTerminal: a tunnel's process for each connection, a shell
+	// unless the task says another program, in a terminal: in the web app,
+	// or raw on one of core's operational ports.
+	FrontTerminal = "terminal"
 )
 
 // TunnelFronts are the fronts a tunnel action takes, the one a task that
@@ -166,7 +178,7 @@ const (
 func TunnelFronts(action string) []string {
 	switch action {
 	case ActionTunnel:
-		return []string{FrontSOCKS, FrontHTTP, FrontForward}
+		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal}
 	case ActionReverseTunnel:
 		return []string{FrontForward, FrontSOCKS}
 	}
@@ -190,13 +202,18 @@ const (
 	// (TunnelItem.TLS).
 	OpenSource = "source"
 	OpenTLS    = "tls"
+	// OpenProcess: a tunnel's processes (TunnelKindProcess, its terminal
+	// front); OpenAccept: its listeners for one connection
+	// (TunnelKindAccept, SOCKS5 BIND).
+	OpenProcess = "process"
+	OpenAccept  = "accept"
 )
 
 // opensOf is what a command of a tunnel action may say it opens.
 func opensOf(action string) []string {
 	switch action {
 	case ActionTunnel:
-		return []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS}
+		return []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS, OpenProcess, OpenAccept}
 	case ActionReverseTunnel:
 		return []string{OpenTCP, OpenUDP}
 	}
@@ -244,7 +261,15 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(),
 				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes."},
 			FieldSpec{Key: ParamTLS, Type: FieldBool, Label: "TLS to the destination", Default: false, Order: next(),
-				Description: "A forward's: the minion speaks TLS to its destination (it checks no certificate), the tools plain."})
+				Description: "A forward's: the minion speaks TLS to its destination (it checks no certificate), the tools plain."},
+			FieldSpec{Key: ParamProgram, Type: FieldString, Label: "Program", MaxLength: MaxTunnelPath, Order: next(),
+				Description: "A terminal's program, on the minion's host's PATH (bash, powershell.exe): none, the host's shell."},
+			FieldSpec{Key: ParamArgs, Type: FieldString, Label: "Args", MaxLength: MaxTunnelArgsBytes, Order: next(),
+				Description: `The program's args, a command line ('quoted words' kept as they are).`},
+			FieldSpec{Key: ParamRows, Type: FieldInt, Label: "Rows", Default: 24, Min: 1, Max: MaxTunnelTerm, Order: next(),
+				Description: "The terminal's rows on the raw port: the web terminal says its own."},
+			FieldSpec{Key: ParamCols, Type: FieldInt, Label: "Columns", Default: 80, Min: 1, Max: MaxTunnelTerm, Order: next(),
+				Description: "The terminal's columns on the raw port."})
 	}
 	return append(out,
 		FieldSpec{Key: ParamCap, Type: FieldBytes, Label: "Bandwidth cap", Default: 0, Min: 0, Unit: "B/s", Order: 1000,
@@ -309,7 +334,8 @@ var actions = map[string]CommandAction{
 		Adds: tunnelCoreParams(ActionTunnel, []EnumOption{
 			{Value: FrontSOCKS, Label: "SOCKS proxy", Description: "SOCKS5 (connect, UDP associate), SOCKS4 and 4a: each tool says where each connection goes."},
 			{Value: FrontHTTP, Label: "HTTP proxy", Description: "CONNECT, and plain requests: for the tools that speak no SOCKS."},
-			{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."}})},
+			{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."},
+			{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."}})},
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
 		CoreParams: []string{ParamStopIdle}, Optional: map[string]FieldType{ParamStopIdle: FieldDuration},
 		Adds: tunnelCoreParams(ActionReverseTunnel, []EnumOption{

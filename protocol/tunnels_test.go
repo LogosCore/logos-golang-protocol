@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -130,7 +131,9 @@ func TestTunnelNames(t *testing.T) {
 	for got, want := range map[string]string{
 		TunnelResultName(TunnelOpen): "open", TunnelResultName(TunnelHostUnreachable): "host_unreachable",
 		TunnelResultName(TunnelFailed): "failed", TunnelResultName(99): "result 99",
-		TunnelResultName(TunnelNotFound): "not_found", TunnelResultName(TunnelDenied): "denied",
+		TunnelResultName(TunnelNotFound): "not_found", TunnelResultName(TunnelDenied): "denied", TunnelResultName(TunnelInUse): "in_use",
+		ItemName(ItemTunnelCtl): "tunnel_ctl", TunnelSignalName(TunnelSignalInterrupt): "interrupt", TunnelSignalName(TunnelSignalKill): "kill",
+		TunnelSignalName(9):              "signal 9",
 		TunnelCloseName(TunnelCloseDone): "done", TunnelCloseName(TunnelCloseTaskEnded): "task_ended",
 		TunnelCloseName(0):   "reason 0",
 		ItemName(ItemTunnel): "tunnel", ItemName(ItemTunnelReply): "tunnel_reply", ItemName(ItemTunnelData): "tunnel_data",
@@ -158,11 +161,11 @@ func TestTunnelAction(t *testing.T) {
 			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
 		}
 	}
-	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,cap" {
+	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,program,args,rows,cols,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	front := TunnelCoreParams(ActionTunnel)[0]
-	if front.Type != FieldEnum || front.Default != FrontSOCKS || len(front.Options) != 3 || front.Options[1].Value != FrontHTTP {
+	if front.Type != FieldEnum || front.Default != FrontSOCKS || len(front.Options) != 4 || front.Options[1].Value != FrontHTTP {
 		t.Errorf("front %+v", front)
 	}
 	if !IsTunnelAction(ActionTunnel) || !IsTunnelAction(ActionReverseTunnel) || IsTunnelAction(ActionListDir) || IsTunnelAction("") ||
@@ -274,7 +277,7 @@ func TestReverseTunnelAction(t *testing.T) {
 // Each tunnel action has its fronts, its default first; no other action
 // has any.
 func TestTunnelFronts(t *testing.T) {
-	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward" {
+	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward,terminal" {
 		t.Errorf("tunnel: %v", f)
 	}
 	if f := TunnelFronts(ActionReverseTunnel); strings.Join(f, ",") != "forward,socks" {
@@ -345,8 +348,8 @@ func TestReadTunnel(t *testing.T) {
 	if err != nil || it.Host != "10.0.0.5" || it.Port != 445 || TunnelRoom(it.Room) != 1024 || !it.Answerable() {
 		t.Errorf("an open: %+v %v", it, err)
 	}
-	// A later version's keys (11, 12).
-	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 4, 3: "10.0.0.5", 4: 443, 11: true, 12: "x"}))
+	// A later version's keys (14, 15).
+	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 4, 3: "10.0.0.5", 4: 443, 14: true, 15: "x"}))
 	if !errors.Is(err, ErrTunnelUnsupported) || !it.Answerable() || it.Stream != 4 || it.Host != "" {
 		t.Errorf("a later open: %+v %v", it, err)
 	}
@@ -473,13 +476,26 @@ func TestTunnelKinds(t *testing.T) {
 		"another host's pipe": open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, `\\dc01\PIPE\lsarpc` }),
 		"from a source":       open(func(i *TunnelItem) { i.Host, i.Port, i.Source = "10.0.0.5", 445, "10.0.0.7" }),
 		"TLS to it":           open(func(i *TunnelItem) { i.Host, i.Port, i.TLS = "intranet.corp", 443, true }),
+		"the host's shell":    open(func(i *TunnelItem) { i.Kind, i.Rows, i.Cols = TunnelKindProcess, 24, 80 }),
+		"a program, args":     open(func(i *TunnelItem) { i.Kind, i.Path, i.Args = TunnelKindProcess, "powershell.exe", []string{"-NoLogo"} }),
+		"an accept":           open(func(i *TunnelItem) { i.Kind, i.Host = TunnelKindAccept, "0.0.0.0" }),
+		"an accept's port":    open(func(i *TunnelItem) { i.Kind, i.Host, i.Port = TunnelKindAccept, "::", 2121 }),
 	} {
 		if err := it.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	for name, it := range map[string]TunnelItem{
-		"a kind past this version's": open(func(i *TunnelItem) { i.Kind, i.Path = 3, "/x" }),
+		"a kind past this version's": open(func(i *TunnelItem) { i.Kind, i.Path = 5, "/x" }),
+		"a process and a host":       open(func(i *TunnelItem) { i.Kind, i.Host, i.Port = TunnelKindProcess, "h", 1 }),
+		"a process with udp":         open(func(i *TunnelItem) { i.Kind, i.UDP = TunnelKindProcess, true }),
+		"rows, no cols":              open(func(i *TunnelItem) { i.Kind, i.Rows = TunnelKindProcess, 24 }),
+		"a socket's args":            open(func(i *TunnelItem) { i.Kind, i.Path, i.Args = TunnelKindUnix, "/x", []string{"a"} }),
+		"a TCP terminal":             open(func(i *TunnelItem) { i.Host, i.Port, i.Rows, i.Cols = "h", 1, 24, 80 }),
+		"an accept, no address":      open(func(i *TunnelItem) { i.Kind = TunnelKindAccept }),
+		"an accept's path":           open(func(i *TunnelItem) { i.Kind, i.Host, i.Path = TunnelKindAccept, "0.0.0.0", "/x" }),
+		"an accept past 65535":       open(func(i *TunnelItem) { i.Kind, i.Host, i.Port = TunnelKindAccept, "0.0.0.0", 70000 }),
+		"an accept with TLS":         open(func(i *TunnelItem) { i.Kind, i.Host, i.TLS = TunnelKindAccept, "0.0.0.0", true }),
 		"a socket and a host":        open(func(i *TunnelItem) { i.Kind, i.Path, i.Host, i.Port = TunnelKindUnix, "/x", "h", 1 }),
 		"a path, no kind":            open(func(i *TunnelItem) { i.Host, i.Port, i.Path = "h", 1, "/x" }),
 		"a kind, no path":            open(func(i *TunnelItem) { i.Kind = TunnelKindUnix }),
@@ -531,5 +547,105 @@ func TestCommandOpens(t *testing.T) {
 	bad.Opens = []string{OpenTCP, OpenTCP}
 	if err := validateBuildTarget(bad, nil, nil); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("a duplicate open: %v", err)
+	}
+}
+
+// A process's open: its program (none: the host's shell), its args, its
+// terminal; an operator's command line splits as a shell's words do.
+func TestTunnelProcess(t *testing.T) {
+	for name, c := range map[string]struct {
+		program    string
+		args       []string
+		rows, cols uint64
+		want       string
+	}{
+		"the host's shell, a terminal": {"", nil, 24, 80, ""},
+		"on pipes":                     {"/bin/cat", nil, 0, 0, ""},
+		"args":                         {"bash", []string{"-l", "a b", ""}, 50, 200, ""},
+		"args to the host's shell":     {"", []string{"-l"}, 24, 80, "with a program"},
+		"cols, no rows":                {"sh", nil, 0, 80, "rows and cols"},
+		"a huge terminal":              {"sh", nil, MaxTunnelTerm + 1, 80, "at most"},
+		"a control in a program":       {"sh\n", nil, 0, 0, "control"},
+		"a NUL in an arg":              {"sh", []string{"a\x00"}, 0, 0, "NUL"},
+		"too many args":                {"sh", make([]string, MaxTunnelArgs+1), 0, 0, "at most"},
+		"args too long":                {"sh", []string{strings.Repeat("a", MaxTunnelArgsBytes+1)}, 0, 0, "together"},
+		"a long program":               {strings.Repeat("a", MaxTunnelPath+1), nil, 0, 0, "at most"},
+	} {
+		err := TunnelProcess(c.program, c.args, c.rows, c.cols)
+		if (c.want == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", name, err, c.want)
+		}
+	}
+	for line, want := range map[string][]string{
+		"":                     nil,
+		"  -l  ":               {"-l"},
+		`-c 'echo $HOME; id'`:  {"-c", "echo $HOME; id"},
+		`-c "a \"b\" c" d\ e`:  {"-c", `a "b" c`, "d e"},
+		`''`:                   {""},
+		`a'b'"c"`:              {"abc"},
+		"-NoLogo\t-NoProfile":  {"-NoLogo", "-NoProfile"},
+		`'C:\Program Files\x'`: {`C:\Program Files\x`},
+	} {
+		if got, err := TunnelArgs(line); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%q: %q %v, want %q", line, got, err, want)
+		}
+	}
+	for _, bad := range []string{`'open`, `"open`, `end\`} {
+		if _, err := TunnelArgs(bad); err == nil {
+			t.Errorf("%q split", bad)
+		}
+	}
+}
+
+// tunnel_ctl says a size, a signal, an exit or who came, and reads back as
+// it went; an ack's Ctl says how far the ctls are taken.
+func TestTunnelCtl(t *testing.T) {
+	task := bytes.Repeat([]byte{7}, 16)
+	ctl := func(f func(*TunnelCtlItem)) TunnelCtlItem {
+		c := TunnelCtlItem{T: ItemTunnelCtl, Task: task, Stream: 1}
+		f(&c)
+		return c
+	}
+	exit := int64(130)
+	for name, c := range map[string]TunnelCtlItem{
+		"a size":         ctl(func(c *TunnelCtlItem) { c.Rows, c.Cols = 50, 200 }),
+		"an interrupt":   ctl(func(c *TunnelCtlItem) { c.Seq, c.Signal = 3, TunnelSignalInterrupt }),
+		"an exit":        ctl(func(c *TunnelCtlItem) { c.Exit = &exit }),
+		"an exit of 0":   ctl(func(c *TunnelCtlItem) { zero := int64(0); c.Exit = &zero }),
+		"who came":       ctl(func(c *TunnelCtlItem) { c.Host, c.Port = "10.0.0.9", 50122 }),
+		"a later signal": ctl(func(c *TunnelCtlItem) { c.Signal = 42 }),
+	} {
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, c := range map[string]TunnelCtlItem{
+		"nothing":      ctl(func(*TunnelCtlItem) {}),
+		"rows alone":   ctl(func(c *TunnelCtlItem) { c.Rows = 50 }),
+		"a huge size":  ctl(func(c *TunnelCtlItem) { c.Rows, c.Cols = 50, MaxTunnelTerm+1 }),
+		"a host alone": ctl(func(c *TunnelCtlItem) { c.Host = "10.0.0.9" }),
+		"a port alone": ctl(func(c *TunnelCtlItem) { c.Port = 1 }),
+		"no stream":    ctl(func(c *TunnelCtlItem) { c.Stream, c.Signal = 0, 1 }),
+		"a short task": ctl(func(c *TunnelCtlItem) { c.Task, c.Signal = task[:4], 1 }),
+		"a minus sign": ctl(func(c *TunnelCtlItem) { c.Signal = -1 }),
+	} {
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+	raw, err := MarshalCBOR(ctl(func(c *TunnelCtlItem) { c.Seq, c.Exit = 2, &exit }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back TunnelCtlItem
+	if err := UnmarshalCBOR(raw, &back); err != nil || back.Seq != 2 || back.Exit == nil || *back.Exit != 130 || ItemType(raw) != ItemTunnelCtl {
+		t.Errorf("read back: %+v %v", back, err)
+	}
+	// An exit of 0 is said, not dropped as empty.
+	zero := int64(0)
+	raw, _ = MarshalCBOR(ctl(func(c *TunnelCtlItem) { c.Exit = &zero }))
+	back = TunnelCtlItem{}
+	if err := UnmarshalCBOR(raw, &back); err != nil || back.Exit == nil || *back.Exit != 0 {
+		t.Errorf("an exit of 0: %+v %v", back, err)
 	}
 }
