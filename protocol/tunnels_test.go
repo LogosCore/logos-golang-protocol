@@ -129,7 +129,8 @@ func TestTunnelItemsRoundTrip(t *testing.T) {
 func TestTunnelNames(t *testing.T) {
 	for got, want := range map[string]string{
 		TunnelResultName(TunnelOpen): "open", TunnelResultName(TunnelHostUnreachable): "host_unreachable",
-		TunnelResultName(TunnelFailed): "failed", TunnelResultName(9): "result 9",
+		TunnelResultName(TunnelFailed): "failed", TunnelResultName(99): "result 99",
+		TunnelResultName(TunnelNotFound): "not_found", TunnelResultName(TunnelDenied): "denied",
 		TunnelCloseName(TunnelCloseDone): "done", TunnelCloseName(TunnelCloseTaskEnded): "task_ended",
 		TunnelCloseName(0):   "reason 0",
 		ItemName(ItemTunnel): "tunnel", ItemName(ItemTunnelReply): "tunnel_reply", ItemName(ItemTunnelData): "tunnel_data",
@@ -157,7 +158,7 @@ func TestTunnelAction(t *testing.T) {
 			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
 		}
 	}
-	if strings.Join(keys, ",") != "front,port,host,to,cap" {
+	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	front := TunnelCoreParams(ActionTunnel)[0]
@@ -314,7 +315,10 @@ func TestTunnelOpens(t *testing.T) {
 	}{
 		"not a tunnel": {BuildCommand{ID: "ls", Op: 4, Action: ActionListDir, Result: ResultDirListing,
 			Params: []FieldSpec{{Key: "path", Num: 1, Type: FieldString}}, Opens: []string{OpenTCP}}, "only a tunnel"},
-		"unknown":   {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{"unix"}}, `"unix" is not one`},
+		"unknown": {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{"icmp"}}, `"icmp" is not one`},
+		"a reverse tunnel's pipe": {BuildCommand{ID: "reverse_tunnel", Op: 17, Action: ActionReverseTunnel,
+			Params: []FieldSpec{{Key: "bind", Num: 1, Type: FieldString, Default: "0.0.0.0"}, {Key: "listen", Num: 2, Type: FieldInt, Default: 0},
+				{Key: "udp", Num: 3, Type: FieldBool, Default: false}}, Opens: []string{OpenPipe}}, `"pipe" is not one of tcp, udp`},
 		"duplicate": {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{OpenUDP, OpenUDP}}, "duplicate"},
 	} {
 		if err := validateBuildCommand(c.cmd, targets); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -341,8 +345,8 @@ func TestReadTunnel(t *testing.T) {
 	if err != nil || it.Host != "10.0.0.5" || it.Port != 445 || TunnelRoom(it.Room) != 1024 || !it.Answerable() {
 		t.Errorf("an open: %+v %v", it, err)
 	}
-	// A later version's: TLS to the destination, a source address.
-	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 4, 3: "10.0.0.5", 4: 443, 7: true, 8: "10.0.0.99"}))
+	// A later version's keys (11, 12).
+	it, err = ReadTunnel(enc(map[int]any{0: ItemTunnel, 1: task, 2: 4, 3: "10.0.0.5", 4: 443, 11: true, 12: "x"}))
 	if !errors.Is(err, ErrTunnelUnsupported) || !it.Answerable() || it.Stream != 4 || it.Host != "" {
 		t.Errorf("a later open: %+v %v", it, err)
 	}
@@ -448,5 +452,84 @@ func TestTunnelStopIdle(t *testing.T) {
 	wire := WireArgs(tunnel.Params, map[string]any{ParamStopIdle: int64(3600000), "timeout": int64(10000)})
 	if len(wire) != 1 {
 		t.Errorf("stop_idle went to the minion: %v", wire)
+	}
+}
+
+// An open of a unix socket or a pipe names its kind and path, no host or
+// port; a source and TLS are a TCP connection's; a path's kind is a pipe's
+// when it starts "\\".
+func TestTunnelKinds(t *testing.T) {
+	task := bytes.Repeat([]byte{7}, 16)
+	open := func(f func(*TunnelItem)) TunnelItem {
+		it := TunnelItem{T: ItemTunnel, Task: task, Stream: 1}
+		f(&it)
+		return it
+	}
+	for name, it := range map[string]TunnelItem{
+		"a unix socket":       open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, "/var/run/docker.sock" }),
+		"an abstract socket":  open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, "@/tmp/.X11-unix/X0" }),
+		"a Windows socket":    open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, `C:\Users\x\agent.sock` }),
+		"a local pipe":        open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, `\\.\pipe\spoolss` }),
+		"another host's pipe": open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, `\\dc01\PIPE\lsarpc` }),
+		"from a source":       open(func(i *TunnelItem) { i.Host, i.Port, i.Source = "10.0.0.5", 445, "10.0.0.7" }),
+		"TLS to it":           open(func(i *TunnelItem) { i.Host, i.Port, i.TLS = "intranet.corp", 443, true }),
+	} {
+		if err := it.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, it := range map[string]TunnelItem{
+		"a kind past this version's": open(func(i *TunnelItem) { i.Kind, i.Path = 3, "/x" }),
+		"a socket and a host":        open(func(i *TunnelItem) { i.Kind, i.Path, i.Host, i.Port = TunnelKindUnix, "/x", "h", 1 }),
+		"a path, no kind":            open(func(i *TunnelItem) { i.Host, i.Port, i.Path = "h", 1, "/x" }),
+		"a kind, no path":            open(func(i *TunnelItem) { i.Kind = TunnelKindUnix }),
+		"a pipe not in \\":           open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, "/tmp/pipe" }),
+		"a pipe with no name":        open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, `\\.\pipe\` }),
+		"a socket in the pipe space": open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, `\\.\pipe\x` }),
+		"a control in a path":        open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, "/x\x00y" }),
+		"a long path":                open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindUnix, "/"+strings.Repeat("a", MaxTunnelPath) }),
+		"a source that is a name":    open(func(i *TunnelItem) { i.Host, i.Port, i.Source = "h", 1, "eth0" }),
+		"a socket's source":          open(func(i *TunnelItem) { i.Kind, i.Path, i.Source = TunnelKindUnix, "/x", "10.0.0.7" }),
+		"UDP with TLS":               open(func(i *TunnelItem) { i.UDP, i.TLS = true, true }),
+	} {
+		if err := it.Validate(); err == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+	if TunnelPathKind(`\\.\pipe\x`) != TunnelKindPipe || TunnelPathKind("/run/x.sock") != TunnelKindUnix || TunnelPathKind("@x") != TunnelKindUnix {
+		t.Error("TunnelPathKind")
+	}
+	// Each reads back as it went.
+	raw, err := MarshalCBOR(open(func(i *TunnelItem) { i.Kind, i.Path = TunnelKindPipe, `\\dc01\pipe\x` }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it, err := ReadTunnel(raw); err != nil || it.Kind != TunnelKindPipe || it.Path != `\\dc01\pipe\x` {
+		t.Errorf("a pipe read back: %+v %v", it, err)
+	}
+}
+
+// A target narrows what its tunnel commands open: a Linux build has no
+// pipes; one that says nothing has all of its commands'.
+func TestCommandOpens(t *testing.T) {
+	cmd := BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS}}
+	s := BuildSchema{Targets: []BuildTarget{{ID: "linux-elf", Opens: []string{OpenTCP, OpenUDP, OpenUnix, OpenSource, OpenTLS}}, {ID: "windows-exe"}},
+		Commands: []BuildCommand{cmd}}
+	if got := strings.Join(s.CommandOpens(cmd, "linux-elf"), ","); got != "tcp,udp,unix,source,tls" {
+		t.Errorf("linux: %s", got)
+	}
+	if got := strings.Join(s.CommandOpens(cmd, "windows-exe"), ","); got != "tcp,udp,unix,pipe,source,tls" {
+		t.Errorf("windows: %s", got)
+	}
+	if got := strings.Join(s.CommandOpens(BuildCommand{ID: "t", Action: ActionTunnel}, "windows-exe"), ","); got != "tcp" {
+		t.Errorf("a command that says none: %s", got)
+	}
+	bad := BuildTarget{ID: "x", Format: "bin", Platforms: []string{"linux/amd64"}, Opens: []string{"icmp"}}
+	if err := validateBuildTarget(bad, nil, nil); err == nil || !strings.Contains(err.Error(), `"icmp"`) {
+		t.Errorf("an unknown open: %v", err)
+	}
+	bad.Opens = []string{OpenTCP, OpenTCP}
+	if err := validateBuildTarget(bad, nil, nil); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("a duplicate open: %v", err)
 	}
 }

@@ -137,6 +137,13 @@ const (
 	// ParamCap is the tunnel's bandwidth cap: bytes a second each way, over
 	// all of its streams together; 0 for none. Core changes it live.
 	ParamCap = "cap"
+	// ParamPath is a forward's destination when it is a unix socket's path
+	// or a named pipe (TunnelPathKind), instead of a host and a port.
+	ParamPath = "path"
+	// ParamSource is the address of the minion's host a tunnel's TCP
+	// connections go from; ParamTLS, TLS to a forward's destination.
+	ParamSource = "source"
+	ParamTLS    = "tls"
 )
 
 // Tunnel fronts: what core puts in front of a tunnel task's streams, the
@@ -166,7 +173,7 @@ func TunnelFronts(action string) []string {
 	return nil
 }
 
-// What a tunnel command opens (BuildCommand.Opens).
+// What a tunnel command opens, and how (BuildCommand.Opens).
 const (
 	// OpenTCP: TCP connections (a tunnel), or a TCP listener (a reverse
 	// tunnel).
@@ -174,10 +181,27 @@ const (
 	// OpenUDP: UDP associations (a tunnel's SOCKS UDP ASSOCIATE), or a UDP
 	// listener (a reverse tunnel's udp).
 	OpenUDP = "udp"
+	// OpenUnix and OpenPipe: a tunnel's unix sockets and named pipes
+	// (TunnelKindUnix, TunnelKindPipe).
+	OpenUnix = "unix"
+	OpenPipe = "pipe"
+	// OpenSource: a tunnel's TCP connections from an address of the
+	// minion's host (TunnelItem.Source); OpenTLS: TLS to the destination
+	// (TunnelItem.TLS).
+	OpenSource = "source"
+	OpenTLS    = "tls"
 )
 
-// opens are the kinds a tunnel command may say it opens.
-var opens = []string{OpenTCP, OpenUDP}
+// opensOf is what a command of a tunnel action may say it opens.
+func opensOf(action string) []string {
+	switch action {
+	case ActionTunnel:
+		return []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS}
+	case ActionReverseTunnel:
+		return []string{OpenTCP, OpenUDP}
+	}
+	return nil
+}
 
 // IsTunnelAction reports whether action is one of TunnelActions.
 func IsTunnelAction(action string) bool { return slices.Contains(TunnelActions(), action) }
@@ -207,11 +231,22 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 		out = append(out, FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
 			Description: "The operational port core listens on: 0 for any free one."})
 	}
-	return append(out,
+	out = append(out,
 		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", MaxLength: MaxTunnelHost, Order: next(),
 			Description: "A forward's destination, reached from " + from + ": a name or an address."},
 		FieldSpec{Key: ParamTo, Type: FieldInt, Label: "Destination port", Min: 0, Max: 65535, Order: next(),
-			Description: "A forward's destination port."},
+			Description: "A forward's destination port."})
+	if action == ActionTunnel {
+		// What a tunnel's command opens decides which of these core offers.
+		out = append(out,
+			FieldSpec{Key: ParamPath, Type: FieldString, Label: "Destination path", MaxLength: MaxTunnelPath, Order: next(),
+				Description: `A forward to a unix socket (/var/run/docker.sock, @name) or a named pipe (\\.\pipe\name, \\host\pipe\name), instead of a host and a port.`},
+			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(),
+				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes."},
+			FieldSpec{Key: ParamTLS, Type: FieldBool, Label: "TLS to the destination", Default: false, Order: next(),
+				Description: "A forward's: the minion speaks TLS to its destination (it checks no certificate), the tools plain."})
+	}
+	return append(out,
 		FieldSpec{Key: ParamCap, Type: FieldBytes, Label: "Bandwidth cap", Default: 0, Min: 0, Unit: "B/s", Order: 1000,
 			Description: "Bytes a second each way, over all of the tunnel's streams: 0 for none. It can be changed while the tunnel runs."})
 }

@@ -99,7 +99,7 @@ func TestRegistry(t *testing.T) {
 		"integrity":       {IntegrityLow, IntegrityMedium, IntegrityHigh, IntegritySystem, IntegrityRoot, IntegrityUser},
 		"identity scopes": {IdentitySession, IdentityTask},
 		"identity ways":   {IdentityImpersonation, IdentityNetwork, IdentityBecome},
-		"tunnel results":  {TunnelOpen + 1, TunnelRefused + 1, TunnelHostUnreachable + 1, TunnelNetUnreachable + 1, TunnelTimedOut + 1, TunnelNotAllowed + 1, TunnelFailed + 1, TunnelUnsupported + 1},
+		"tunnel results":  {TunnelOpen + 1, TunnelRefused + 1, TunnelHostUnreachable + 1, TunnelNetUnreachable + 1, TunnelTimedOut + 1, TunnelNotAllowed + 1, TunnelFailed + 1, TunnelUnsupported + 1, TunnelNotFound + 1, TunnelDenied + 1},
 		"tunnel closes":   {TunnelCloseDone, TunnelCloseReset, TunnelCloseUnknown, TunnelCloseTaskEnded},
 		"entry types":     {EntryDir, EntryFile, EntryLink, EntryOther},
 		"listing errors":  {ListingErrDenied, ListingErrNotFound, ListingErrOther},

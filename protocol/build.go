@@ -167,6 +167,10 @@ type BuildTarget struct {
 	// them, and an entry without kinds all of the channel's. The connection
 	// parameters stay the factory's.
 	Channels []ChannelVersions `json:"channels,omitempty"`
+	// Opens narrows what this target's tunnel commands open (their Opens),
+	// for a platform that has less (a Linux build has no named pipes):
+	// empty means all of them (CommandOpens).
+	Opens []string `json:"opens,omitempty"`
 }
 
 // BuildCommand is a command a factory's minions can be built with. An
@@ -209,11 +213,14 @@ type BuildCommand struct {
 	// interactive shell needs a connection either side can speak on at
 	// once): core refuses a task of it on a session on another kind.
 	Kinds []string `json:"kinds,omitempty"`
-	// Opens is what a tunnel command's minion opens (OpenTCP, OpenUDP): TCP
+	// Opens is what a tunnel command's minion opens, and how: TCP
 	// connections and UDP associations (a tunnel), or a TCP or UDP listener
-	// (a reverse tunnel). Empty: TCP alone. Core opens nothing else
-	// through it: a SOCKS UDP ASSOCIATE through a command that opens no
-	// udp is refused at once. Only a tunnel command says it (CanOpen).
+	// (a reverse tunnel); a tunnel's unix sockets and named pipes
+	// (OpenUnix, OpenPipe), its connections from a source address
+	// (OpenSource) and TLS to the destination (OpenTLS). Empty: TCP alone.
+	// Core opens nothing else through it: a SOCKS UDP ASSOCIATE through a
+	// command that opens no udp is refused at once. Only a tunnel command
+	// says it (CanOpen); a target may narrow it (BuildTarget.Opens).
 	Opens []string `json:"opens,omitempty"`
 }
 
@@ -224,6 +231,26 @@ func (c BuildCommand) CanOpen(kind string) bool {
 		return kind == OpenTCP
 	}
 	return slices.Contains(c.Opens, kind)
+}
+
+// CommandOpens is what c's minion opens in a build of target id: its
+// Opens (TCP alone when it says none), narrowed by the target's Opens.
+func (s BuildSchema) CommandOpens(c BuildCommand, target string) []string {
+	out := c.Opens
+	if len(out) == 0 {
+		out = []string{OpenTCP}
+	}
+	t, ok := s.Target(target)
+	if !ok || len(t.Opens) == 0 {
+		return slices.Clone(out)
+	}
+	var narrowed []string
+	for _, o := range out {
+		if slices.Contains(t.Opens, o) {
+			narrowed = append(narrowed, o)
+		}
+	}
+	return narrowed
 }
 
 // For reports whether a build of target id can have the command.
@@ -557,8 +584,8 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 		return fmt.Errorf("opens: only a tunnel command (%s) says what it opens", strings.Join(TunnelActions(), ", "))
 	}
 	for i, o := range c.Opens {
-		if !slices.Contains(opens, o) {
-			return fmt.Errorf("opens: %q is not one of %s", o, strings.Join(opens, ", "))
+		if allowed := opensOf(c.Action); !slices.Contains(allowed, o) {
+			return fmt.Errorf("opens: %q is not one of %s", o, strings.Join(allowed, ", "))
 		}
 		if slices.Contains(c.Opens[:i], o) {
 			return fmt.Errorf("opens: duplicate %q", o)
@@ -685,6 +712,15 @@ func validateBuildTarget(t BuildTarget, shared map[string]bool, channels map[str
 			if prev.ModuleName == c.ModuleName {
 				return fmt.Errorf("duplicate channel %q", c.ModuleName)
 			}
+		}
+	}
+	all := opensOf(ActionTunnel)
+	for i, o := range t.Opens {
+		if !slices.Contains(all, o) {
+			return fmt.Errorf("opens: %q is not one of %s", o, strings.Join(all, ", "))
+		}
+		if slices.Contains(t.Opens[:i], o) {
+			return fmt.Errorf("opens: duplicate %q", o)
 		}
 	}
 	return nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -84,7 +85,31 @@ const (
 	// datagram either way for that long: the minion closes it (done), and
 	// core, a minute later still, as a backstop.
 	TunnelUDPIdle = 2 * time.Minute
+	// MaxTunnelPath bounds a unix socket's path or a named pipe's name.
+	MaxTunnelPath = 1024
 )
+
+// What an open opens (TunnelItem.Kind): a TCP connection when it says none
+// (a UDP association by its UDP), else a unix socket or a named pipe, to
+// its Path.
+const (
+	// TunnelKindUnix: a unix domain socket, a path ("/var/run/docker.sock")
+	// or an abstract name ("@name"); Linux's and Windows' alike.
+	TunnelKindUnix = 1
+	// TunnelKindPipe: a Windows named pipe, "\\.\pipe\name" or another
+	// host's "\\host\pipe\name" (over SMB, as the minion's user).
+	TunnelKindPipe = 2
+)
+
+// TunnelPathKind is the kind of open a path names: a named pipe when it
+// starts "\\" (the pipe namespace, "\\.\pipe\name", "\\host\pipe\name"),
+// else a unix socket.
+func TunnelPathKind(path string) int {
+	if strings.HasPrefix(path, `\\`) {
+		return TunnelKindPipe
+	}
+	return TunnelKindUnix
+}
 
 // TunnelItem opens a stream. Core → minion: a TCP connection to Host:Port
 // from the minion's host, or (UDP) a UDP association, a socket the minion
@@ -108,13 +133,44 @@ type TunnelItem struct {
 	Room *uint64 `cbor:"5,keyasint,omitempty"`
 	// UDP: a UDP association, not a TCP connection.
 	UDP bool `cbor:"6,keyasint,omitempty"`
+	// Kind is what the open opens, Path where: TunnelKindUnix or
+	// TunnelKindPipe and its path, instead of a host and a port; none, a
+	// TCP connection (or by UDP a UDP association).
+	Kind int    `cbor:"7,keyasint,omitempty"`
+	Path string `cbor:"8,keyasint,omitempty"`
+	// Source is the address of the minion's host a TCP connection goes
+	// from (an IP): one of its host's, on a host with two networks; none,
+	// as the host routes it. TLS: TLS to the destination once connected,
+	// its Host the name it says (the minion checks no certificate). Each
+	// only where its command opens it (OpenSource, OpenTLS).
+	Source string `cbor:"9,keyasint,omitempty"`
+	TLS    bool   `cbor:"10,keyasint,omitempty"`
 }
 
 // Validate checks the task, the stream, the address (for UDP none, or a
-// reverse port forward's source) and the window.
+// reverse port forward's source; for a unix socket or a pipe, its path),
+// its source and TLS (a TCP connection's alone) and the window.
 func (t TunnelItem) Validate() error {
 	if err := tunnelStream("tunnel", t.Task, t.Stream); err != nil {
 		return err
+	}
+	switch {
+	case t.Kind < 0 || t.Kind > TunnelKindPipe:
+		return fmt.Errorf("tunnel: kind %d is not one this version opens", t.Kind)
+	case t.Kind != 0 && (t.Host != "" || t.Port != 0 || t.UDP):
+		return errors.New("tunnel: a unix socket or a pipe names its path, no host, port or udp")
+	case t.Kind == 0 && t.Path != "":
+		return errors.New("tunnel: a path names a unix socket's or a pipe's, with its kind")
+	case t.Source != "" && net.ParseIP(t.Source) == nil:
+		return errors.New("tunnel: source is an address of the minion's host, an IP")
+	case (t.Source != "" || t.TLS) && (t.Kind != 0 || t.UDP):
+		return errors.New("tunnel: source and tls are a TCP connection's")
+	}
+	if t.Kind != 0 {
+		if err := TunnelPath(t.Kind, t.Path); err != nil {
+			return err
+		}
+		return tunnelRoom("tunnel", t.Room)
 	}
 	if t.UDP {
 		if (t.Host != "" || t.Port != 0) && tunnelPeer("tunnel", t.Host, t.Port) != nil {
@@ -126,9 +182,37 @@ func (t TunnelItem) Validate() error {
 	return tunnelRoom("tunnel", t.Room)
 }
 
+// TunnelPath checks a unix socket's path or a pipe's name: printable
+// UTF-8, MaxTunnelPath bytes at most; a pipe's "\\host\pipe\name" (host "."
+// for the minion's own), a unix socket's not that.
+func TunnelPath(kind int, path string) error {
+	switch {
+	case path == "":
+		return errors.New("tunnel: a path")
+	case len(path) > MaxTunnelPath:
+		return fmt.Errorf("tunnel: a path is %d bytes at most", MaxTunnelPath)
+	case !utf8.ValidString(path):
+		return errors.New("tunnel: a path is UTF-8")
+	}
+	for _, r := range path {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("tunnel: a path has a control character")
+		}
+	}
+	host, rest, ok := strings.Cut(strings.TrimPrefix(path, `\\`), `\`)
+	pipe := strings.HasPrefix(path, `\\`) && ok && host != "" && strings.HasPrefix(strings.ToLower(rest), `pipe\`) && len(rest) > len(`pipe\`)
+	switch {
+	case kind == TunnelKindPipe && !pipe:
+		return errors.New(`tunnel: a pipe is \\host\pipe\name, host "." for the minion's own`)
+	case kind == TunnelKindUnix && TunnelPathKind(path) == TunnelKindPipe:
+		return errors.New(`tunnel: a path in \\ names a pipe, not a unix socket`)
+	}
+	return nil
+}
+
 // tunnelKeys is the highest key of a tunnel item this version knows: an
 // open with a key past it is a later version's, which ReadTunnel refuses.
-const tunnelKeys = 6
+const tunnelKeys = 10
 
 // ErrTunnelUnsupported: an open (a tunnel item) with a key this version
 // does not know. Ignoring it would misread a later version's open (TLS to
@@ -213,12 +297,17 @@ const (
 	// than misread it. A receiver that does not know it reads it as
 	// TunnelFailed.
 	TunnelUnsupported = 7
+	// TunnelNotFound: nothing is there: no such unix socket or pipe.
+	TunnelNotFound = 8
+	// TunnelDenied: the minion may not open it (the socket's or the pipe's
+	// rights, a remote pipe's logon).
+	TunnelDenied = 9
 )
 
 var tunnelResultNames = map[int]string{
 	TunnelOpen: "open", TunnelRefused: "refused", TunnelHostUnreachable: "host_unreachable",
 	TunnelNetUnreachable: "net_unreachable", TunnelTimedOut: "timed_out", TunnelNotAllowed: "not_allowed",
-	TunnelFailed: "failed", TunnelUnsupported: "unsupported",
+	TunnelFailed: "failed", TunnelUnsupported: "unsupported", TunnelNotFound: "not_found", TunnelDenied: "denied",
 }
 
 // TunnelResultName is a result's name, for people: "result 9" for one this
