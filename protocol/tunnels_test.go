@@ -161,7 +161,7 @@ func TestTunnelAction(t *testing.T) {
 			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
 		}
 	}
-	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,program,args,rows,cols,cap" {
+	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,program,args,rows,cols,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	front := TunnelCoreParams(ActionTunnel)[0]
@@ -174,8 +174,7 @@ func TestTunnelAction(t *testing.T) {
 	}
 	tunnel := BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{OpenTCP, OpenUDP}, Params: []FieldSpec{
 		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "10s"},
-		{Key: "max_streams", Num: 3, Type: FieldInt, Default: 256},
-		{Key: ParamStopIdle, Type: FieldDuration, Default: "1h"}}}
+		{Key: "max_streams", Num: 3, Type: FieldInt, Default: 256}}}
 	if err := validateResultAction(tunnel); err != nil {
 		t.Errorf("tunnel: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestTunnelAction(t *testing.T) {
 	if err := validateResultAction(withResult); err == nil || !strings.Contains(err.Error(), "has no result") {
 		t.Errorf("tunnel with a result: %v", err)
 	}
-	for _, key := range []string{ParamFront, ParamPort, ParamHost, ParamTo, ParamCap} {
+	for _, key := range []string{ParamFront, ParamPort, ParamHost, ParamTo, ParamStopIdle, ParamCap} {
 		own := tunnel
 		own.Params = append([]FieldSpec{{Key: key, Num: 9, Type: FieldString, Default: "x"}}, tunnel.Params...)
 		if err := validateResultAction(own); err == nil || !strings.Contains(err.Error(), "core's") {
@@ -222,7 +221,7 @@ func TestReverseTunnelAction(t *testing.T) {
 	for _, p := range TunnelCoreParams(ActionReverseTunnel) {
 		keys = append(keys, p.Key)
 	}
-	if strings.Join(keys, ",") != "front,host,to,cap" {
+	if strings.Join(keys, ",") != "front,host,to,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	if front := TunnelCoreParams(ActionReverseTunnel)[0]; front.Default != FrontForward || len(front.Options) != 2 || front.Order != 4 {
@@ -410,49 +409,30 @@ func TestTunnelListen(t *testing.T) {
 	}
 }
 
-// stop_idle is every tunnel action's optional, core-only param: a command
-// may take it (a duration, no num) or leave it out; one of another type,
-// or numbered, is refused, and a task never takes it to the minion.
+// stop_idle is a param core adds to every tunnel command, its default the
+// action's (a tunnel 1h, a reverse tunnel never), just before the cap: a
+// duration, no num, never the minion's. A factory declares it no more.
 func TestTunnelStopIdle(t *testing.T) {
-	for _, action := range TunnelActions() {
-		a, _ := KnownAction(action)
-		if a.Optional[ParamStopIdle] != FieldDuration || !IsCoreParam(action, ParamStopIdle) {
-			t.Fatalf("%s: %+v", action, a)
+	for action, want := range map[string]string{ActionTunnel: "1h", ActionReverseTunnel: "0s"} {
+		params := TunnelCoreParams(action)
+		i := slices.IndexFunc(params, func(p FieldSpec) bool { return p.Key == ParamStopIdle })
+		if i < 0 || i != len(params)-2 || params[i].Type != FieldDuration || params[i].Default != want || params[i].Num != 0 ||
+			params[i].Order >= params[i+1].Order || !IsCoreParam(action, ParamStopIdle) {
+			t.Fatalf("%s: %+v", action, params)
 		}
 	}
 	if IsCoreParam(ActionListDir, ParamStopIdle) {
 		t.Error("a list_dir's stop_idle is core's")
 	}
 	tunnel := BuildCommand{ID: "tunnel", Op: 9, Action: ActionTunnel, Params: []FieldSpec{
-		{Key: ParamStopIdle, Type: FieldDuration, Default: "1h"},
 		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "10s"}}}
-	if err := validateResultAction(tunnel); err != nil {
-		t.Errorf("with stop_idle: %v", err)
+	declared := tunnel
+	declared.Params = append([]FieldSpec{{Key: ParamStopIdle, Type: FieldDuration, Default: "1h"}}, tunnel.Params...)
+	if err := validateResultAction(declared); err == nil || !strings.Contains(err.Error(), "core's") {
+		t.Errorf("a factory's stop_idle: %v", err)
 	}
-	if err := validateCommandNumbers(tunnel); err != nil {
-		t.Errorf("with stop_idle, numbers: %v", err)
-	}
-	without := tunnel
-	without.Params = []FieldSpec{tunnel.Params[1]}
-	if err := validateResultAction(without); err != nil {
-		t.Errorf("without stop_idle: %v", err)
-	}
-	noDefault := tunnel
-	noDefault.Params = []FieldSpec{{Key: ParamStopIdle, Type: FieldDuration}}
-	if err := validateResultAction(noDefault); err != nil {
-		t.Errorf("a stop_idle with no default: %v", err)
-	}
-	wrongType := tunnel
-	wrongType.Params = []FieldSpec{{Key: ParamStopIdle, Type: FieldInt, Default: 60}}
-	if err := validateResultAction(wrongType); err == nil || !strings.Contains(err.Error(), "or none") {
-		t.Errorf("an int stop_idle: %v", err)
-	}
-	numbered := tunnel
-	numbered.Params = []FieldSpec{{Key: ParamStopIdle, Num: 3, Type: FieldDuration, Default: "1h"}}
-	if err := validateCommandNumbers(numbered); err == nil || !strings.Contains(err.Error(), "takes no num") {
-		t.Errorf("a numbered stop_idle: %v", err)
-	}
-	wire := WireArgs(tunnel.Params, map[string]any{ParamStopIdle: int64(3600000), "timeout": int64(10000)})
+	params := append(append([]FieldSpec{}, tunnel.Params...), TunnelCoreParams(ActionTunnel)...)
+	wire := WireArgs(params, map[string]any{ParamStopIdle: int64(3600000), "timeout": int64(10000)})
 	if len(wire) != 1 {
 		t.Errorf("stop_idle went to the minion: %v", wire)
 	}

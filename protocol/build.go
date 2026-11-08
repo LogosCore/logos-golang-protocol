@@ -526,7 +526,7 @@ func IsCoreCommand(id string) bool {
 
 // validateCommandNumbers checks a command's op and its params' nums: each 1
 // to MaxCommandNumber, the nums once each; none for a param that is core's
-// alone (its action's CoreParams), which never goes to the minion.
+// alone (one its action adds), which never goes to the minion.
 func validateCommandNumbers(c BuildCommand) error {
 	if c.Op < 1 || c.Op > MaxCommandNumber {
 		return fmt.Errorf("op must be 1 to %d", MaxCommandNumber)
