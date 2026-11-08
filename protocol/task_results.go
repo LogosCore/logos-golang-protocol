@@ -100,7 +100,8 @@ const (
 	// (FrontForward), which no param names. A reverse SOCKS front was
 	// dropped: a minion's holder would learn its password, which crosses
 	// the minion in the clear, and reach all of core's network with it.
-	// bind, listen and udp are the minion's, read from its task; host, to,
+	// bind, listen and udp (a command's that opens udp alone:
+	// CommandAction.ByOpen) are the minion's, read from its task; host, to,
 	// stop_idle and cap are core's alone (CommandAction.Adds), so the
 	// minion never learns where core sends what comes. The same items, the streams the minion's
 	// (tunnels.go); no result; more params, each with a default.
@@ -339,6 +340,11 @@ var results = map[string]bool{
 // the file browser).
 type CommandAction struct {
 	Params map[string]FieldType
+	// ByOpen are params a command takes for what it opens (its Opens), beside
+	// Params: required, of their types, in a command that opens that kind,
+	// and declared by none that does not (a reverse tunnel's udp, in the
+	// commands that listen for datagrams alone).
+	ByOpen map[string]map[string]FieldType
 	Result string
 	// Adds are params core adds to every command of the action, beside the
 	// command's own (a tunnel's front, port, destination, stop_idle and
@@ -373,8 +379,46 @@ var actions = map[string]CommandAction{
 		{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."},
 		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."},
 		{Value: FrontVPN, Label: "VPN", Description: "logos-vpn routes an operator's machine into the minion's networks: every tool there, scans and pings too."}})},
-	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
-		Adds: tunnelCoreParams(ActionReverseTunnel, nil)},
+	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt},
+		ByOpen: map[string]map[string]FieldType{OpenUDP: {"udp": FieldBool}},
+		Adds:   tunnelCoreParams(ActionReverseTunnel, nil)},
+}
+
+// actionParam reports whether key is one of the action's own params in c:
+// its Params, or one of ByOpen for a kind c opens.
+func actionParam(spec CommandAction, c BuildCommand, key string) bool {
+	if _, own := spec.Params[key]; own {
+		return true
+	}
+	for open, params := range spec.ByOpen {
+		if _, own := params[key]; own && c.CanOpen(open) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateOpenParams checks the params c takes for what it opens
+// (CommandAction.ByOpen): each of its type when c opens that kind, none when
+// it does not.
+func validateOpenParams(c BuildCommand) error {
+	spec, ok := actions[c.Action]
+	if !ok {
+		return nil
+	}
+	for _, open := range keysOf(spec.ByOpen) {
+		for _, k := range keysOf(spec.ByOpen[open]) {
+			typ := spec.ByOpen[open][k]
+			i := slices.IndexFunc(c.Params, func(p FieldSpec) bool { return p.Key == k })
+			switch opens := c.CanOpen(open); {
+			case opens && (i < 0 || c.Params[i].Type != typ):
+				return fmt.Errorf("action %q takes a %s param %q in a command that opens %s", c.Action, typ, k, open)
+			case !opens && i >= 0:
+				return fmt.Errorf("param %q is for a %s command that opens %s, which this one does not", k, c.Action, open)
+			}
+		}
+	}
+	return nil
 }
 
 // KnownResult reports whether this version defines the result.
@@ -411,7 +455,7 @@ func validateResultAction(c BuildCommand) error {
 		if slices.ContainsFunc(spec.Adds, func(a FieldSpec) bool { return a.Key == p.Key }) {
 			return fmt.Errorf("param %q is core's: core adds it to every %s command, and a factory declares none", p.Key, c.Action)
 		}
-		if _, own := spec.Params[p.Key]; !own && p.Default == nil {
+		if !actionParam(spec, c, p.Key) && p.Default == nil {
 			return fmt.Errorf("param %q needs a default: core runs a %s command with the action's params alone", p.Key, c.Action)
 		}
 	}

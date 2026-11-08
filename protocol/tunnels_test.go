@@ -209,13 +209,13 @@ func TestTunnelAction(t *testing.T) {
 }
 
 // A reverse tunnel's command declares where its minion listens (bind,
-// listen, udp: the minion's, numbered); core adds the destination, required,
-// stop_idle and the cap, never the minion's to know. Its one front, forward,
-// no param names.
+// listen, and udp in one that opens udp: the minion's, numbered); core adds
+// the destination, required, stop_idle and the cap, never the minion's to
+// know. Its one front, forward, no param names.
 func TestReverseTunnelAction(t *testing.T) {
 	a, ok := KnownAction(ActionReverseTunnel)
-	if !ok || a.Result != "" || a.Params["bind"] != FieldString || a.Params["listen"] != FieldInt || a.Params["udp"] != FieldBool ||
-		len(a.Params) != 3 {
+	if !ok || a.Result != "" || a.Params["bind"] != FieldString || a.Params["listen"] != FieldInt || len(a.Params) != 2 ||
+		a.ByOpen[OpenUDP]["udp"] != FieldBool || len(a.ByOpen) != 1 {
 		t.Fatalf("reverse tunnel: %+v %v", a, ok)
 	}
 	var keys []string
@@ -244,10 +244,41 @@ func TestReverseTunnelAction(t *testing.T) {
 	if err := validateCommandNumbers(reverse); err != nil {
 		t.Errorf("reverse tunnel's numbers: %v", err)
 	}
-	noUDP := reverse
-	noUDP.Params = append([]FieldSpec{}, reverse.Params[:2]...)
-	if err := validateResultAction(noUDP); err == nil || !strings.Contains(err.Error(), `"udp"`) {
-		t.Errorf("a reverse tunnel without udp: %v", err)
+	// udp is the action's in a command that opens udp alone: required
+	// there (of its type, a default or none), refused in one that does not.
+	withUDP := reverse
+	withUDP.Opens = []string{OpenTCP, OpenUDP}
+	if err := validateBuildCommand(withUDP, nil); err != nil {
+		t.Errorf("a reverse tunnel that opens udp: %v", err)
+	}
+	required := withUDP
+	required.Params = append([]FieldSpec{}, reverse.Params...)
+	required.Params[2] = FieldSpec{Key: "udp", Num: 5, Type: FieldBool, Required: true}
+	if err := validateBuildCommand(required, nil); err != nil {
+		t.Errorf("a required udp: %v", err)
+	}
+	noUDP := withUDP
+	noUDP.Params = append(append([]FieldSpec{}, reverse.Params[:2]...), reverse.Params[3:]...)
+	if err := validateBuildCommand(noUDP, nil); err == nil || !strings.Contains(err.Error(), `takes a bool param "udp" in a command that opens udp`) {
+		t.Errorf("a reverse tunnel that opens udp, without udp: %v", err)
+	}
+	wrongType := withUDP
+	wrongType.Params = append([]FieldSpec{}, reverse.Params...)
+	wrongType.Params[2] = FieldSpec{Key: "udp", Num: 5, Type: FieldString, Default: "no"}
+	if err := validateBuildCommand(wrongType, nil); err == nil || !strings.Contains(err.Error(), `takes a bool param "udp"`) {
+		t.Errorf("a string udp: %v", err)
+	}
+	tcpOnly := noUDP
+	tcpOnly.Opens = []string{OpenTCP}
+	if err := validateBuildCommand(tcpOnly, nil); err != nil {
+		t.Errorf("a reverse tunnel of TCP alone, without udp: %v", err)
+	}
+	tcpOnly.Opens = nil // TCP alone, as it says none
+	if err := validateBuildCommand(tcpOnly, nil); err != nil {
+		t.Errorf("a reverse tunnel that says no opens, without udp: %v", err)
+	}
+	if err := validateBuildCommand(reverse, nil); err == nil || !strings.Contains(err.Error(), `param "udp" is for a reverse_tunnel command that opens udp`) {
+		t.Errorf("a reverse tunnel of TCP alone, with udp: %v", err)
 	}
 	unnumbered := reverse
 	unnumbered.Params = append([]FieldSpec{}, reverse.Params...)

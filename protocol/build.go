@@ -591,6 +591,9 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 			return fmt.Errorf("opens: duplicate %q", o)
 		}
 	}
+	if err := validateOpenParams(c); err != nil {
+		return err
+	}
 	if len(c.Params) > MaxCommandParams {
 		return fmt.Errorf("too many params (%d > %d)", len(c.Params), MaxCommandParams)
 	}
