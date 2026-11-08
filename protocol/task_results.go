@@ -95,10 +95,11 @@ const (
 	// minion listens on its host at bind:listen (listen 0: any free port)
 	// and opens a stream for each connection that comes there; with udp,
 	// it listens for datagrams, a stream for each address they come from.
-	// What core does with each is the task's front: forward connects it to
-	// host:to from core's network (a UDP one's datagrams sent on there),
-	// socks reads a SOCKS5 request from it, behind a password core makes
-	// for the task, and connects where it asks. bind, listen and udp are
+	// What core does with each is the task's front: forward, the one there
+	// is, connects it to host:to from core's network (a UDP one's datagrams
+	// sent on there). A reverse SOCKS front was dropped: a minion's holder
+	// would learn its password, which crosses the minion in the clear, and
+	// reach all of core's network with it. bind, listen and udp are
 	// the minion's, read from its task; the front, host, to, stop_idle and
 	// cap are core's alone (CommandAction.Adds), so the minion never learns
 	// where core sends what comes. The same items, the streams the minion's
@@ -160,8 +161,7 @@ const (
 // operator's to pick as the task starts (ParamFront).
 const (
 	// FrontSOCKS: a tunnel's SOCKS proxy (5, 4 and 4a) on one of core's
-	// operational ports; a reverse tunnel's, a SOCKS5 proxy into core's
-	// network behind a password core makes for the task.
+	// operational ports. A reverse tunnel takes none.
 	FrontSOCKS = "socks"
 	// FrontHTTP: a tunnel's HTTP proxy (CONNECT, and plain requests) on one
 	// of core's operational ports.
@@ -182,7 +182,7 @@ func TunnelFronts(action string) []string {
 	case ActionTunnel:
 		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal}
 	case ActionReverseTunnel:
-		return []string{FrontForward, FrontSOCKS}
+		return []string{FrontForward}
 	}
 	return nil
 }
@@ -335,8 +335,7 @@ var actions = map[string]CommandAction{
 		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."}})},
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
 		Adds: tunnelCoreParams(ActionReverseTunnel, []EnumOption{
-			{Value: FrontForward, Label: "Reverse port forward", Description: "Core connects every connection to the destination."},
-			{Value: FrontSOCKS, Label: "Reverse SOCKS", Description: "A SOCKS5 proxy into core's network, behind a password core makes: TCP only."}})},
+			{Value: FrontForward, Label: "Reverse port forward", Description: "Core connects every connection to the destination."}})},
 }
 
 // KnownResult reports whether this version defines the result.

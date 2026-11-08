@@ -224,7 +224,7 @@ func TestReverseTunnelAction(t *testing.T) {
 	if strings.Join(keys, ",") != "front,host,to,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
-	if front := TunnelCoreParams(ActionReverseTunnel)[0]; front.Default != FrontForward || len(front.Options) != 2 || front.Order != 4 {
+	if front := TunnelCoreParams(ActionReverseTunnel)[0]; front.Default != FrontForward || len(front.Options) != 1 || front.Order != 4 {
 		t.Errorf("front %+v", front)
 	}
 	if !IsCoreParam(ActionReverseTunnel, ParamHost) || !IsCoreParam(ActionReverseTunnel, ParamTo) || IsCoreParam(ActionReverseTunnel, "bind") ||
@@ -279,7 +279,7 @@ func TestTunnelFronts(t *testing.T) {
 	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward,terminal" {
 		t.Errorf("tunnel: %v", f)
 	}
-	if f := TunnelFronts(ActionReverseTunnel); strings.Join(f, ",") != "forward,socks" {
+	if f := TunnelFronts(ActionReverseTunnel); strings.Join(f, ",") != "forward" {
 		t.Errorf("reverse tunnel: %v", f)
 	}
 	if TunnelFronts(ActionListDir) != nil || TunnelCoreParams(ActionListDir) != nil {
