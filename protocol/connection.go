@@ -247,6 +247,9 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			if err := validateConnectionFieldSpec(f); err != nil {
 				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
 			}
+			if err := notParam(f); err != nil {
+				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
+			}
 			if keys[f.Key] {
 				return fmt.Errorf("kinds.%s: duplicate field key %q", kind, f.Key)
 			}

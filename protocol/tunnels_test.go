@@ -209,8 +209,9 @@ func TestTunnelAction(t *testing.T) {
 }
 
 // A reverse tunnel's command declares where its minion listens (bind,
-// listen, udp: the minion's, numbered); core adds the front, the
-// destination and the cap, never the minion's to know.
+// listen, udp: the minion's, numbered); core adds the destination, required,
+// stop_idle and the cap, never the minion's to know. Its one front, forward,
+// no param names.
 func TestReverseTunnelAction(t *testing.T) {
 	a, ok := KnownAction(ActionReverseTunnel)
 	if !ok || a.Result != "" || a.Params["bind"] != FieldString || a.Params["listen"] != FieldInt || a.Params["udp"] != FieldBool ||
@@ -221,14 +222,14 @@ func TestReverseTunnelAction(t *testing.T) {
 	for _, p := range TunnelCoreParams(ActionReverseTunnel) {
 		keys = append(keys, p.Key)
 	}
-	if strings.Join(keys, ",") != "front,host,to,stop_idle,cap" {
+	if strings.Join(keys, ",") != "host,to,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
-	if front := TunnelCoreParams(ActionReverseTunnel)[0]; front.Default != FrontForward || len(front.Options) != 1 || front.Order != 4 {
-		t.Errorf("front %+v", front)
+	if host := TunnelCoreParams(ActionReverseTunnel)[0]; !host.Required || host.When != nil || host.Order != 4 {
+		t.Errorf("host %+v", host)
 	}
 	if !IsCoreParam(ActionReverseTunnel, ParamHost) || !IsCoreParam(ActionReverseTunnel, ParamTo) || IsCoreParam(ActionReverseTunnel, "bind") ||
-		IsCoreParam(ActionReverseTunnel, ParamPort) {
+		IsCoreParam(ActionReverseTunnel, ParamPort) || IsCoreParam(ActionReverseTunnel, ParamFront) {
 		t.Error("IsCoreParam")
 	}
 	reverse := BuildCommand{ID: "reverse_tunnel", Op: 17, Action: ActionReverseTunnel, Params: []FieldSpec{
@@ -255,7 +256,7 @@ func TestReverseTunnelAction(t *testing.T) {
 		t.Errorf("an unnumbered bind: %v", err)
 	}
 	params := append(append([]FieldSpec{}, reverse.Params...), TunnelCoreParams(ActionReverseTunnel)...)
-	wire := WireArgs(params, map[string]any{"bind": "0.0.0.0", "listen": int64(8080), "udp": true, ParamFront: FrontForward,
+	wire := WireArgs(params, map[string]any{"bind": "0.0.0.0", "listen": int64(8080), "udp": true,
 		ParamHost: "10.8.0.2", ParamTo: int64(4444), "timeout": int64(10000), "max_streams": int64(256)})
 	if len(wire) != 5 || wire[1] != "0.0.0.0" || wire[2] != int64(8080) {
 		t.Errorf("wire args %v", wire)
@@ -267,7 +268,7 @@ func TestReverseTunnelAction(t *testing.T) {
 		t.Error("a text read as a bool")
 	}
 	for _, v := range wire {
-		if v == "10.8.0.2" || v == int64(4444) || v == FrontForward {
+		if v == "10.8.0.2" || v == int64(4444) {
 			t.Errorf("the destination went to the minion: %v", wire)
 		}
 	}
@@ -285,14 +286,104 @@ func TestTunnelFronts(t *testing.T) {
 	if TunnelFronts(ActionListDir) != nil || TunnelCoreParams(ActionListDir) != nil {
 		t.Error("list_dir has fronts")
 	}
-	// Each front's option says it, the default first.
-	for _, action := range TunnelActions() {
-		front := TunnelCoreParams(action)[0]
-		for i, f := range TunnelFronts(action) {
-			if front.Options[i].Value != f || front.Options[i].Label == "" {
-				t.Errorf("%s: option %d %+v, want %s", action, i, front.Options[i], f)
+	// Each front's option says it, the default first; a reverse tunnel's
+	// one front no param names.
+	front := TunnelCoreParams(ActionTunnel)[0]
+	for i, f := range TunnelFronts(ActionTunnel) {
+		if front.Key != ParamFront || front.Options[i].Value != f || front.Options[i].Label == "" {
+			t.Errorf("option %d %+v, want %s", i, front.Options[i], f)
+		}
+	}
+	if slices.ContainsFunc(TunnelCoreParams(ActionReverseTunnel), func(p FieldSpec) bool { return p.Key == ParamFront }) {
+		t.Error("a reverse tunnel's front is a param")
+	}
+}
+
+// A tunnel's params apply by its front (When): a destination a forward's,
+// a source a connection's (no terminal's), a program and its size a
+// terminal's; what is seldom changed is Advanced. A reverse tunnel's params
+// name no front. Core's params are valid params of a command's form.
+func TestTunnelParamsByFront(t *testing.T) {
+	want := map[string]string{
+		ParamHost: "forward", ParamTo: "forward", ParamPath: "forward", ParamTLS: "forward",
+		ParamSource:  "socks,http,forward",
+		ParamProgram: "terminal", ParamArgs: "terminal", ParamRows: "terminal", ParamCols: "terminal",
+	}
+	advanced := func(params []FieldSpec) string {
+		var keys []string
+		for _, p := range params {
+			if p.Advanced {
+				keys = append(keys, p.Key)
 			}
 		}
+		return strings.Join(keys, ",")
+	}
+	params := TunnelCoreParams(ActionTunnel)
+	for _, p := range params {
+		got := ""
+		if p.When != nil {
+			got = p.When.Key + ":" + strings.Join(p.When.Values, ",")
+		}
+		if w := want[p.Key]; (w == "" && got != "") || (w != "" && got != ParamFront+":"+w) {
+			t.Errorf("%s: when %q, want %q", p.Key, got, w)
+		}
+	}
+	if got := advanced(params); got != "source,rows,cols,stop_idle,cap" {
+		t.Errorf("tunnel's advanced: %s", got)
+	}
+	reverse := TunnelCoreParams(ActionReverseTunnel)
+	for _, p := range reverse {
+		if p.When != nil {
+			t.Errorf("reverse %s: when %+v", p.Key, *p.When)
+		}
+	}
+	if got := advanced(reverse); got != "stop_idle,cap" {
+		t.Errorf("reverse tunnel's advanced: %s", got)
+	}
+	for _, action := range TunnelActions() {
+		for _, p := range TunnelCoreParams(action) {
+			if err := checkFieldSpec(p, scopeBuild); err != nil {
+				t.Errorf("%s %s: %v", action, p.Key, err)
+			}
+		}
+		if err := validateParamConditions(TunnelCoreParams(action), nil); err != nil {
+			t.Errorf("%s: %v", action, err)
+		}
+	}
+
+	// A SOCKS proxy by the defaults: no destination, no terminal's size.
+	keysOfArgs := func(args map[string]any) string {
+		keys := make([]string, 0, len(args))
+		for k := range args {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		return strings.Join(keys, ",")
+	}
+	args, problems := TaskArgs(params, map[string]any{})
+	if problems != nil || keysOfArgs(args) != "cap,front,port,stop_idle" {
+		t.Errorf("socks: %v %v", args, problems)
+	}
+	_, problems = TaskArgs(params, map[string]any{ParamHost: "10.0.0.5", ParamRows: 30})
+	if problems[ParamHost] != "only when front is forward" || problems[ParamRows] != "only when front is terminal" {
+		t.Errorf("a socks proxy's destination, rows: %v", problems)
+	}
+	_, problems = TaskArgs(params, map[string]any{ParamFront: FrontTerminal, ParamSource: "10.0.0.7"})
+	if problems[ParamSource] != "only when front is socks, http or forward" {
+		t.Errorf("a terminal's source: %v", problems)
+	}
+	args, problems = TaskArgs(params, map[string]any{ParamFront: FrontTerminal})
+	if problems != nil || args[ParamRows] != int64(24) || args[ParamCols] != int64(80) || args[ParamTLS] != nil {
+		t.Errorf("a terminal: %v %v", args, problems)
+	}
+	args, problems = TaskArgs(params, map[string]any{ParamFront: FrontForward, ParamHost: "10.0.0.5", ParamTo: 3389})
+	if problems != nil || args[ParamTLS] != false || args[ParamRows] != nil || args[ParamHost] != "10.0.0.5" {
+		t.Errorf("a forward: %v %v", args, problems)
+	}
+	// A reverse tunnel's destination is required; no front is its param.
+	_, problems = TaskArgs(reverse, map[string]any{ParamFront: FrontForward})
+	if problems[ParamFront] != "not a declared field" || problems[ParamHost] != "value is required" || problems[ParamTo] != "value is required" {
+		t.Errorf("a reverse tunnel's front, destination: %v", problems)
 	}
 }
 

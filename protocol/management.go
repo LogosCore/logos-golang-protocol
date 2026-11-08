@@ -153,6 +153,34 @@ type FieldSpec struct {
 	// (TaskItem.Args), 1 to MaxCommandNumber, once per command. Only a
 	// build command's params have one (BuildCommand.Params).
 	Num int `json:"num,omitempty"`
+	// When makes a param apply only while another param of its form holds
+	// one of some values (a tunnel's host, only with front forward). A form
+	// shows it only then; a value given otherwise is refused, and its
+	// default is not filled in. Only a command's or an action's params have
+	// one.
+	When *FieldCondition `json:"when,omitempty"`
+	// Advanced is a param one seldom changes (a connect timeout): a form
+	// shows it under More options, folded. Only a command's or an action's
+	// params are.
+	Advanced bool `json:"advanced,omitempty"`
+}
+
+// FieldCondition is when a param applies (FieldSpec.When): while the param
+// Key of its form, an enum with no condition of its own, holds one of
+// Values, given or by its default.
+type FieldCondition struct {
+	Key    string   `json:"key"`
+	Values []string `json:"values"`
+}
+
+// String is the condition as a problem says it: "front is forward",
+// "front is socks, http or forward".
+func (c FieldCondition) String() string {
+	n := len(c.Values)
+	if n < 2 {
+		return c.Key + " is " + strings.Join(c.Values, "")
+	}
+	return c.Key + " is " + strings.Join(c.Values[:n-1], ", ") + " or " + c.Values[n-1]
 }
 
 // PropertySpec is a manageable property. Default is the module's own effective
@@ -329,6 +357,9 @@ func ValidateManifest(m ManagementManifest) error {
 		if err := validateFieldSpec(p.FieldSpec); err != nil {
 			return fmt.Errorf("property %q: %w", p.Key, err)
 		}
+		if err := notParam(p.FieldSpec); err != nil {
+			return fmt.Errorf("property %q: %w", p.Key, err)
+		}
 		if seen[p.Key] {
 			return fmt.Errorf("duplicate property key %q", p.Key)
 		}
@@ -368,6 +399,9 @@ func ValidateManifest(m ManagementManifest) error {
 				return fmt.Errorf("action %q: duplicate param %q", a.Name, p.Key)
 			}
 			params[p.Key] = true
+		}
+		if err := validateParamConditions(a.Params, nil); err != nil {
+			return fmt.Errorf("action %q: %w", a.Name, err)
 		}
 	}
 
@@ -447,6 +481,81 @@ func validateConnectionFieldSpec(f FieldSpec) error { return checkFieldSpec(f, s
 
 // validateBuildFieldSpec checks a field of a build schema.
 func validateBuildFieldSpec(f FieldSpec) error { return checkFieldSpec(f, scopeBuild) }
+
+// notParam refuses, for a field that is no param (a property, a
+// connection's or a build's field), what only a form of params takes: a
+// condition (When) and Advanced.
+func notParam(f FieldSpec) error {
+	if f.When != nil || f.Advanced {
+		return fmt.Errorf("when and advanced are only for a command's or an action's params")
+	}
+	return nil
+}
+
+// validateParamConditions checks the conditions of a form's params
+// (FieldSpec.When) against the form: params, and others beside them (the
+// params core adds to a command of its action, which a condition may name).
+func validateParamConditions(params, others []FieldSpec) error {
+	form := slices.Concat(params, others)
+	for _, p := range params {
+		if p.When == nil {
+			continue
+		}
+		if err := checkCondition(*p.When, p.Key, form); err != nil {
+			return fmt.Errorf("param %q: when: %w", p.Key, err)
+		}
+	}
+	return nil
+}
+
+func checkCondition(c FieldCondition, key string, form []FieldSpec) error {
+	if c.Key == key {
+		return fmt.Errorf("it names the param itself")
+	}
+	i := slices.IndexFunc(form, func(f FieldSpec) bool { return f.Key == c.Key })
+	if i < 0 {
+		return fmt.Errorf("%q is no param of the form", c.Key)
+	}
+	on := form[i]
+	if on.Type != FieldEnum {
+		return fmt.Errorf("%q is a %s: a condition names an enum", c.Key, on.Type)
+	}
+	if on.When != nil {
+		return fmt.Errorf("%q has a condition of its own", c.Key)
+	}
+	if len(c.Values) == 0 || len(c.Values) > MaxEnumOptions {
+		return fmt.Errorf("needs 1..%d values", MaxEnumOptions)
+	}
+	for j, v := range c.Values {
+		if !hasOption(on, v) {
+			return fmt.Errorf("%q is not one of %s's options", v, c.Key)
+		}
+		if slices.Contains(c.Values[:j], v) {
+			return fmt.Errorf("it names %q twice", v)
+		}
+	}
+	return nil
+}
+
+// FieldApplies reports whether f applies in a form of fields, given
+// values: always, without a condition (When); with one, while the param it
+// names holds one of its values, given or by its default. One that does
+// not takes no value (ValidateFieldValues refuses one) and no default.
+func FieldApplies(f FieldSpec, fields []FieldSpec, values map[string]any) bool {
+	if f.When == nil {
+		return true
+	}
+	v, ok := values[f.When.Key]
+	if !ok || v == nil {
+		i := slices.IndexFunc(fields, func(o FieldSpec) bool { return o.Key == f.When.Key })
+		if i < 0 {
+			return false
+		}
+		v = fields[i].Default
+	}
+	s, _ := v.(string)
+	return slices.Contains(f.When.Values, s)
+}
 
 func checkFieldSpec(f FieldSpec, scope fieldScope) error {
 	if !keyPattern.MatchString(f.Key) {
@@ -797,9 +906,10 @@ func hasOption(f FieldSpec, value string) bool {
 }
 
 // ValidateFieldValues checks a set of values against fields: every key must
-// be declared, every value valid, every required field set. It returns the
-// problems by key (nil when there are none); an undeclared key is reported
-// under its own name.
+// be declared, every value valid, every required field set. A field whose
+// condition (When) does not hold takes no value, and is not required. It
+// returns the problems by key (nil when there are none); an undeclared key
+// is reported under its own name.
 func ValidateFieldValues(fields []FieldSpec, values map[string]any) map[string]string {
 	return validateValues(fields, values, "not a declared field")
 }
@@ -823,7 +933,14 @@ func validateValues(fields []FieldSpec, values map[string]any, undeclared string
 	}
 	for _, f := range fields {
 		v, ok := values[f.Key]
-		if !ok || v == nil {
+		set := ok && v != nil
+		if !FieldApplies(f, fields, values) {
+			if set {
+				add(f.Key, "only when "+f.When.String())
+			}
+			continue
+		}
+		if !set {
 			if f.Required && f.Default == nil {
 				add(f.Key, "value is required")
 			}
@@ -838,10 +955,14 @@ func validateValues(fields []FieldSpec, values map[string]any, undeclared string
 
 // ResolveFieldValues returns values over the fields' defaults, for declared
 // fields only: what a module is given, so it never interprets a schema.
-// Fields with neither a value nor a default are left out.
+// Fields with neither a value nor a default are left out, and so are those
+// whose condition (When) does not hold.
 func ResolveFieldValues(fields []FieldSpec, values map[string]any) map[string]any {
 	out := make(map[string]any, len(fields))
 	for _, f := range fields {
+		if !FieldApplies(f, fields, values) {
+			continue
+		}
 		if v, ok := values[f.Key]; ok && v != nil {
 			out[f.Key] = v
 		} else if f.Default != nil {

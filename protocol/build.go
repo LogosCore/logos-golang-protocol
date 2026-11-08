@@ -615,7 +615,9 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 			}
 		}
 	}
-	return nil
+	// A condition may name a param core adds to the command's action (a
+	// tunnel's front).
+	return validateParamConditions(c.Params, actions[c.Action].Adds)
 }
 
 func validateChannelVersions(c ChannelVersions) error {
@@ -653,6 +655,9 @@ func validateBuildFields(fields []FieldSpec, taken map[string]bool) (map[string]
 	}
 	for _, f := range fields {
 		if err := validateBuildFieldSpec(f); err != nil {
+			return nil, fmt.Errorf("field %q: %w", f.Key, err)
+		}
+		if err := notParam(f); err != nil {
 			return nil, fmt.Errorf("field %q: %w", f.Key, err)
 		}
 		if keys[f.Key] {

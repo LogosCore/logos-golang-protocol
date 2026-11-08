@@ -95,14 +95,14 @@ const (
 	// minion listens on its host at bind:listen (listen 0: any free port)
 	// and opens a stream for each connection that comes there; with udp,
 	// it listens for datagrams, a stream for each address they come from.
-	// What core does with each is the task's front: forward, the one there
-	// is, connects it to host:to from core's network (a UDP one's datagrams
-	// sent on there). A reverse SOCKS front was dropped: a minion's holder
-	// would learn its password, which crosses the minion in the clear, and
-	// reach all of core's network with it. bind, listen and udp are
-	// the minion's, read from its task; the front, host, to, stop_idle and
-	// cap are core's alone (CommandAction.Adds), so the minion never learns
-	// where core sends what comes. The same items, the streams the minion's
+	// Core connects each to host:to from its own network (a UDP one's
+	// datagrams sent on there): a reverse port forward, its one front
+	// (FrontForward), which no param names. A reverse SOCKS front was
+	// dropped: a minion's holder would learn its password, which crosses
+	// the minion in the clear, and reach all of core's network with it.
+	// bind, listen and udp are the minion's, read from its task; host, to,
+	// stop_idle and cap are core's alone (CommandAction.Adds), so the
+	// minion never learns where core sends what comes. The same items, the streams the minion's
 	// (tunnels.go); no result; more params, each with a default.
 	ActionReverseTunnel = "reverse_tunnel"
 )
@@ -128,8 +128,9 @@ const ParamStopIdle = "stop_idle"
 // The params core adds to every tunnel command (CommandAction.Adds): the
 // operator gives them as a tunnel starts, and the minion never sees them.
 const (
-	// ParamFront is what core puts in front of the tunnel's streams: one of
-	// its action's TunnelFronts, its first when none is given.
+	// ParamFront is what core puts in front of a tunnel's streams: one of
+	// TunnelFronts(ActionTunnel), its first when none is given. A reverse
+	// tunnel has none: its one front is forward.
 	ParamFront = "front"
 	// ParamPort is a tunnel's operational port: 0 for any free one.
 	ParamPort = "port"
@@ -176,7 +177,8 @@ const (
 )
 
 // TunnelFronts are the fronts a tunnel action takes, the one a task that
-// names none gets first; nil for any other action.
+// names none gets first (a reverse tunnel's one, forward, it never names:
+// it has no front param); nil for any other action.
 func TunnelFronts(action string) []string {
 	switch action {
 	case ActionTunnel:
@@ -232,55 +234,74 @@ func TunnelCoreParams(action string) []FieldSpec {
 	return slices.Clone(actions[action].Adds)
 }
 
-// tunnelCoreParams are what core adds to a tunnel action's commands: the
-// front (fronts its options, the first the default), a tunnel's port, a
+// tunnelCoreParams are what core adds to a tunnel action's commands: a
+// tunnel's front (fronts its options, the first the default) and port, a
 // forward's destination, when core stops it idle (stop_idle) and the
 // bandwidth cap. They carry no num. They come first in a tunnel's form,
 // after where a reverse tunnel listens (its command's bind, listen and
 // udp: orders 1 to 3), and stop_idle and the cap last; a command's own
-// params take orders from 10.
+// params take orders from 10. A tunnel's apply by its front (When): its
+// destination a forward's alone, its program a terminal's. A reverse
+// tunnel has one front, forward (fronts nil): no param names it, and its
+// destination is required. What is seldom changed is Advanced.
 func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
-	order, from := 0, "the minion's host"
-	if action == ActionReverseTunnel {
-		order, from = 3, "core's network"
+	reverse := action == ActionReverseTunnel
+	order := 0
+	if reverse {
+		order = 3
 	}
 	next := func() int { order++; return order }
-	out := []FieldSpec{{Key: ParamFront, Type: FieldEnum, Label: "Front", Default: fronts[0].Value, Options: fronts, Order: next(),
-		Description: "What core puts in front of the tunnel."}}
-	if action == ActionTunnel {
-		out = append(out, FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
-			Description: "The operational port core listens on: 0 for any free one."})
+	on := func(values ...string) *FieldCondition {
+		if reverse {
+			return nil
+		}
+		return &FieldCondition{Key: ParamFront, Values: values}
+	}
+	host, to := "A forward's destination, reached from the minion's host: a name or an address.", "A forward's destination port."
+	if reverse {
+		host, to = "Where core connects each connection that comes, from its own network: a name or an address.", "The destination's port."
+	}
+	var out []FieldSpec
+	if !reverse {
+		out = append(out,
+			FieldSpec{Key: ParamFront, Type: FieldEnum, Label: "Front", Default: fronts[0].Value, Options: fronts, Order: next(),
+				Description: "What core puts in front of the tunnel."},
+			FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
+				Description: "The operational port core listens on: 0 for any free one."})
 	}
 	out = append(out,
-		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", MaxLength: MaxTunnelHost, Order: next(),
-			Description: "A forward's destination, reached from " + from + ": a name or an address."},
-		FieldSpec{Key: ParamTo, Type: FieldInt, Label: "Destination port", Min: 0, Max: 65535, Order: next(),
-			Description: "A forward's destination port."})
-	if action == ActionTunnel {
+		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", Required: reverse, MaxLength: MaxTunnelHost, Order: next(),
+			Description: host, When: on(FrontForward)},
+		FieldSpec{Key: ParamTo, Type: FieldInt, Label: "Destination port", Required: reverse, Min: 1, Max: 65535, Order: next(),
+			Description: to, When: on(FrontForward)})
+	if !reverse {
 		// What a tunnel's command opens decides which of these core offers.
 		out = append(out,
 			FieldSpec{Key: ParamPath, Type: FieldString, Label: "Destination path", MaxLength: MaxTunnelPath, Order: next(),
-				Description: `A forward to a unix socket (/var/run/docker.sock, @name) or a named pipe (\\.\pipe\name, \\host\pipe\name), instead of a host and a port.`},
-			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(),
-				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes."},
+				Description: `A forward to a unix socket (/var/run/docker.sock, @name) or a named pipe (\\.\pipe\name, \\host\pipe\name), instead of a host and a port.`,
+				When:        on(FrontForward)},
+			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(), Advanced: true,
+				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes.",
+				When:        on(FrontSOCKS, FrontHTTP, FrontForward)},
 			FieldSpec{Key: ParamTLS, Type: FieldBool, Label: "TLS to the destination", Default: false, Order: next(),
-				Description: "A forward's: the minion speaks TLS to its destination (it checks no certificate), the tools plain."},
+				Description: "The minion speaks TLS to the destination (it checks no certificate), the tools plain: a host and a port's, not a path's.",
+				When:        on(FrontForward)},
 			FieldSpec{Key: ParamProgram, Type: FieldString, Label: "Program", MaxLength: MaxTunnelPath, Order: next(),
-				Description: "A terminal's program, on the minion's host's PATH (bash, powershell.exe): none, the host's shell."},
+				Description: "On the minion's host's PATH (bash, powershell.exe): none, the host's shell.", When: on(FrontTerminal)},
 			FieldSpec{Key: ParamArgs, Type: FieldString, Label: "Args", MaxLength: MaxTunnelArgsBytes, Order: next(),
-				Description: `The program's args, a command line ('quoted words' kept as they are).`},
-			FieldSpec{Key: ParamRows, Type: FieldInt, Label: "Rows", Default: 24, Min: 1, Max: MaxTunnelTerm, Order: next(),
-				Description: "The terminal's rows on the raw port: the web terminal says its own."},
-			FieldSpec{Key: ParamCols, Type: FieldInt, Label: "Columns", Default: 80, Min: 1, Max: MaxTunnelTerm, Order: next(),
-				Description: "The terminal's columns on the raw port."})
+				Description: `The program's args, a command line ('quoted words' kept as they are).`, When: on(FrontTerminal)},
+			FieldSpec{Key: ParamRows, Type: FieldInt, Label: "Rows", Default: 24, Min: 1, Max: MaxTunnelTerm, Order: next(), Advanced: true,
+				Description: "The terminal's rows on the raw port: the web terminal says its own.", When: on(FrontTerminal)},
+			FieldSpec{Key: ParamCols, Type: FieldInt, Label: "Columns", Default: 80, Min: 1, Max: MaxTunnelTerm, Order: next(), Advanced: true,
+				Description: "The terminal's columns on the raw port.", When: on(FrontTerminal)})
 	}
 	idle, idleNote := "1h", "Core stops the tunnel once no connection has been open this long: 0s never."
-	if action == ActionReverseTunnel {
+	if reverse {
 		idle, idleNote = "0s", "Core stops the tunnel once no connection has been open this long: 0s never, the default: a reverse tunnel often waits for a callback."
 	}
 	return append(out,
-		FieldSpec{Key: ParamStopIdle, Type: FieldDuration, Label: "Stop when idle for", Default: idle, Order: 999, Description: idleNote},
-		FieldSpec{Key: ParamCap, Type: FieldBytes, Label: "Bandwidth cap", Default: 0, Min: 0, Unit: "B/s", Order: 1000,
+		FieldSpec{Key: ParamStopIdle, Type: FieldDuration, Label: "Stop when idle for", Default: idle, Order: 999, Advanced: true, Description: idleNote},
+		FieldSpec{Key: ParamCap, Type: FieldBytes, Label: "Bandwidth cap", Default: 0, Min: 0, Unit: "B/s", Order: 1000, Advanced: true,
 			Description: "Bytes a second each way, over all of the tunnel's streams: 0 for none. It can be changed while the tunnel runs."})
 }
 
@@ -334,8 +355,7 @@ var actions = map[string]CommandAction{
 		{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."},
 		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."}})},
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
-		Adds: tunnelCoreParams(ActionReverseTunnel, []EnumOption{
-			{Value: FrontForward, Label: "Reverse port forward", Description: "Core connects every connection to the destination."}})},
+		Adds: tunnelCoreParams(ActionReverseTunnel, nil)},
 }
 
 // KnownResult reports whether this version defines the result.
