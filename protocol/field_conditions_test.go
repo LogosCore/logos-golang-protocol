@@ -128,8 +128,8 @@ func TestParamConditionsChecked(t *testing.T) {
 	if err := validateBuildCommand(tunnel, nil); err != nil {
 		t.Errorf("a tunnel's param by its front: %v", err)
 	}
-	tunnel.Params[0].When = when(ParamFront, "vpn")
-	if err := validateBuildCommand(tunnel, nil); err == nil || !strings.Contains(err.Error(), `"vpn" is not one of front's options`) {
+	tunnel.Params[0].When = when(ParamFront, "wireguard")
+	if err := validateBuildCommand(tunnel, nil); err == nil || !strings.Contains(err.Error(), `"wireguard" is not one of front's options`) {
 		t.Errorf("a front core has not: %v", err)
 	}
 	shell := BuildCommand{ID: "shell", Op: 11, Params: []FieldSpec{{Key: "command", Num: 1, Type: FieldString, Required: true,

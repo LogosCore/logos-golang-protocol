@@ -41,31 +41,31 @@ func TestTunnelItems(t *testing.T) {
 		}
 	}
 	bad := map[string]v{
-		"tunnel, short task":      TunnelItem{T: ItemTunnel, Task: []byte{1}, Stream: 1, Host: "h", Port: 1},
-		"tunnel, stream 0":        TunnelItem{T: ItemTunnel, Task: task, Host: "h", Port: 1},
-		"tunnel, no host":         TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Port: 1},
-		"tunnel, port 0":          TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h"},
-		"tunnel, port 65536":      TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", Port: 65536},
-		"tunnel, long host":       TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: strings.Repeat("h", MaxTunnelHost+1), Port: 1},
-		"tunnel, control in host": TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h\x00st", Port: 1},
-		"tunnel, host not UTF-8":  TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "\xff", Port: 1},
-		"tunnel, room too big":    TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", Port: 1, Room: &big},
-		"udp, a host alone":       TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", UDP: true},
-		"udp, a port alone":       TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Port: 53, UDP: true},
-		"reply, negative result":  TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Result: -1},
-		"reply, long bound":       TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Bound: strings.Repeat("1", MaxTunnelBound+1)},
-		"reply, long msg":         TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Result: 6, Msg: strings.Repeat("m", MaxTunnelMsg+1)},
-		"reply, stream 0":         TunnelReplyItem{T: ItemTunnelReply, Task: task},
-		"data, nothing":           TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Off: 3},
-		"data, too much":          TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Data: make([]byte, MaxTunnelData+1)},
-		"data, past the end":      TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Off: math.MaxUint64, EOF: true},
-		"ack, room too big":       TunnelAckItem{T: ItemTunnelAck, Task: task, Stream: 1, Room: &big},
-		"ack, stream 0":           TunnelAckItem{T: ItemTunnelAck, Task: task},
-		"close, no reason":        TunnelCloseItem{T: ItemTunnelClose, Task: task, Stream: 1},
-		"close, msg not UTF-8":    TunnelCloseItem{T: ItemTunnelClose, Task: task, Stream: 1, Reason: 2, Msg: "\xff"},
-		"datagram, no host":       TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Port: 53},
-		"datagram, port 0":        TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Host: "h"},
-		"datagram, too big":       TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Host: "h", Port: 53, Data: make([]byte, MaxTunnelDatagram+1)},
+		"tunnel, short task":        TunnelItem{T: ItemTunnel, Task: []byte{1}, Stream: 1, Host: "h", Port: 1},
+		"tunnel, stream 0":          TunnelItem{T: ItemTunnel, Task: task, Host: "h", Port: 1},
+		"tunnel, no host":           TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Port: 1},
+		"tunnel, port 0":            TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h"},
+		"tunnel, port 65536":        TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", Port: 65536},
+		"tunnel, long host":         TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: strings.Repeat("h", MaxTunnelHost+1), Port: 1},
+		"tunnel, control in host":   TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h\x00st", Port: 1},
+		"tunnel, host not UTF-8":    TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "\xff", Port: 1},
+		"tunnel, room too big":      TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", Port: 1, Room: &big},
+		"udp, a host alone":         TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Host: "h", UDP: true},
+		"udp, a port alone":         TunnelItem{T: ItemTunnel, Task: task, Stream: 1, Port: 53, UDP: true},
+		"reply, negative result":    TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Result: -1},
+		"reply, long bound":         TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Bound: strings.Repeat("1", MaxTunnelBound+1)},
+		"reply, long msg":           TunnelReplyItem{T: ItemTunnelReply, Task: task, Stream: 1, Result: 6, Msg: strings.Repeat("m", MaxTunnelMsg+1)},
+		"reply, stream 0":           TunnelReplyItem{T: ItemTunnelReply, Task: task},
+		"data, nothing":             TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Off: 3},
+		"data, too much":            TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Data: make([]byte, MaxTunnelData+1)},
+		"data, past the end":        TunnelDataItem{T: ItemTunnelData, Task: task, Stream: 1, Off: math.MaxUint64, EOF: true},
+		"ack, room too big":         TunnelAckItem{T: ItemTunnelAck, Task: task, Stream: 1, Room: &big},
+		"ack, stream 0":             TunnelAckItem{T: ItemTunnelAck, Task: task},
+		"close, no reason":          TunnelCloseItem{T: ItemTunnelClose, Task: task, Stream: 1},
+		"close, msg not UTF-8":      TunnelCloseItem{T: ItemTunnelClose, Task: task, Stream: 1, Reason: 2, Msg: "\xff"},
+		"datagram, no host":         TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Port: 53},
+		"datagram, port past 65535": TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Host: "h", Port: 70000},
+		"datagram, too big":         TunnelDatagramItem{T: ItemTunnelDatagram, Task: task, Stream: 3, Host: "h", Port: 53, Data: make([]byte, MaxTunnelDatagram+1)},
 	}
 	for name, it := range bad {
 		if err := it.Validate(); err == nil {
@@ -161,11 +161,11 @@ func TestTunnelAction(t *testing.T) {
 			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
 		}
 	}
-	if strings.Join(keys, ",") != "front,port,host,to,path,source,tls,program,args,rows,cols,stop_idle,cap" {
+	if strings.Join(keys, ",") != "front,port,routes,host,to,path,source,tls,program,args,rows,cols,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	front := TunnelCoreParams(ActionTunnel)[0]
-	if front.Type != FieldEnum || front.Default != FrontSOCKS || len(front.Options) != 4 || front.Options[1].Value != FrontHTTP {
+	if front.Type != FieldEnum || front.Default != FrontSOCKS || len(front.Options) != 5 || front.Options[1].Value != FrontHTTP {
 		t.Errorf("front %+v", front)
 	}
 	if !IsTunnelAction(ActionTunnel) || !IsTunnelAction(ActionReverseTunnel) || IsTunnelAction(ActionListDir) || IsTunnelAction("") ||
@@ -277,7 +277,7 @@ func TestReverseTunnelAction(t *testing.T) {
 // Each tunnel action has its fronts, its default first; no other action
 // has any.
 func TestTunnelFronts(t *testing.T) {
-	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward,terminal" {
+	if f := TunnelFronts(ActionTunnel); strings.Join(f, ",") != "socks,http,forward,terminal,vpn" {
 		t.Errorf("tunnel: %v", f)
 	}
 	if f := TunnelFronts(ActionReverseTunnel); strings.Join(f, ",") != "forward" {
@@ -306,7 +306,8 @@ func TestTunnelFronts(t *testing.T) {
 func TestTunnelParamsByFront(t *testing.T) {
 	want := map[string]string{
 		ParamHost: "forward", ParamTo: "forward", ParamPath: "forward", ParamTLS: "forward",
-		ParamSource:  "socks,http,forward",
+		ParamSource: "socks,http,forward,vpn",
+		ParamPort:   "socks,http,forward,terminal", ParamRoutes: "vpn",
 		ParamProgram: "terminal", ParamArgs: "terminal", ParamRows: "terminal", ParamCols: "terminal",
 	}
 	advanced := func(params []FieldSpec) string {
@@ -369,7 +370,7 @@ func TestTunnelParamsByFront(t *testing.T) {
 		t.Errorf("a socks proxy's destination, rows: %v", problems)
 	}
 	_, problems = TaskArgs(params, map[string]any{ParamFront: FrontTerminal, ParamSource: "10.0.0.7"})
-	if problems[ParamSource] != "only when front is socks, http or forward" {
+	if problems[ParamSource] != "only when front is socks, http, forward or vpn" {
 		t.Errorf("a terminal's source: %v", problems)
 	}
 	args, problems = TaskArgs(params, map[string]any{ParamFront: FrontTerminal})
@@ -408,7 +409,7 @@ func TestTunnelOpens(t *testing.T) {
 	}{
 		"not a tunnel": {BuildCommand{ID: "ls", Op: 4, Action: ActionListDir, Result: ResultDirListing,
 			Params: []FieldSpec{{Key: "path", Num: 1, Type: FieldString}}, Opens: []string{OpenTCP}}, "only a tunnel"},
-		"unknown": {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{"icmp"}}, `"icmp" is not one`},
+		"unknown": {BuildCommand{ID: "tunnel", Op: 15, Action: ActionTunnel, Opens: []string{"sctp"}}, `"sctp" is not one`},
 		"a reverse tunnel's pipe": {BuildCommand{ID: "reverse_tunnel", Op: 17, Action: ActionReverseTunnel,
 			Params: []FieldSpec{{Key: "bind", Num: 1, Type: FieldString, Default: "0.0.0.0"}, {Key: "listen", Num: 2, Type: FieldInt, Default: 0},
 				{Key: "udp", Num: 3, Type: FieldBool, Default: false}}, Opens: []string{OpenPipe}}, `"pipe" is not one of tcp, udp`},
@@ -611,8 +612,8 @@ func TestCommandOpens(t *testing.T) {
 	if got := strings.Join(s.CommandOpens(BuildCommand{ID: "t", Action: ActionTunnel}, "windows-exe"), ","); got != "tcp" {
 		t.Errorf("a command that says none: %s", got)
 	}
-	bad := BuildTarget{ID: "x", Format: "bin", Platforms: []string{"linux/amd64"}, Opens: []string{"icmp"}}
-	if err := validateBuildTarget(bad, nil, nil); err == nil || !strings.Contains(err.Error(), `"icmp"`) {
+	bad := BuildTarget{ID: "x", Format: "bin", Platforms: []string{"linux/amd64"}, Opens: []string{"sctp"}}
+	if err := validateBuildTarget(bad, nil, nil); err == nil || !strings.Contains(err.Error(), `"sctp"`) {
 		t.Errorf("an unknown open: %v", err)
 	}
 	bad.Opens = []string{OpenTCP, OpenTCP}

@@ -156,6 +156,9 @@ const (
 	ParamArgs    = "args"
 	ParamRows    = "rows"
 	ParamCols    = "cols"
+	// ParamRoutes are a VPN's networks (FrontVPN): CIDRs the client routes
+	// on the operator's machine (TunnelRoutes). Core changes them live.
+	ParamRoutes = "routes"
 )
 
 // Tunnel fronts: what core puts in front of a tunnel task's streams, the
@@ -174,6 +177,11 @@ const (
 	// unless the task says another program, in a terminal: in the web app,
 	// or raw on one of core's operational ports.
 	FrontTerminal = "terminal"
+	// FrontVPN: a tunnel's VPN: logos-vpn, core's client on an operator's
+	// machine, routes the machine into the task's routes (ParamRoutes),
+	// each connection, UDP flow and ping it sees there a stream, over core's
+	// own address (the VPN link, VPNPath): no operational port.
+	FrontVPN = "vpn"
 )
 
 // TunnelFronts are the fronts a tunnel action takes, the one a task that
@@ -182,7 +190,7 @@ const (
 func TunnelFronts(action string) []string {
 	switch action {
 	case ActionTunnel:
-		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal}
+		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal, FrontVPN}
 	case ActionReverseTunnel:
 		return []string{FrontForward}
 	}
@@ -211,13 +219,16 @@ const (
 	// (TunnelKindAccept, SOCKS5 BIND).
 	OpenProcess = "process"
 	OpenAccept  = "accept"
+	// OpenICMP: a tunnel's pings (TunnelKindICMP, its VPN front): echo
+	// requests sent from the minion's host, and what answers them.
+	OpenICMP = "icmp"
 )
 
 // opensOf is what a command of a tunnel action may say it opens.
 func opensOf(action string) []string {
 	switch action {
 	case ActionTunnel:
-		return []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS, OpenProcess, OpenAccept}
+		return []string{OpenTCP, OpenUDP, OpenUnix, OpenPipe, OpenSource, OpenTLS, OpenProcess, OpenAccept, OpenICMP}
 	case ActionReverseTunnel:
 		return []string{OpenTCP, OpenUDP}
 	}
@@ -236,14 +247,16 @@ func TunnelCoreParams(action string) []FieldSpec {
 
 // tunnelCoreParams are what core adds to a tunnel action's commands: a
 // tunnel's front (fronts its options, the first the default) and port, a
-// forward's destination, when core stops it idle (stop_idle) and the
-// bandwidth cap. They carry no num. They come first in a tunnel's form,
-// after where a reverse tunnel listens (its command's bind, listen and
-// udp: orders 1 to 3), and stop_idle and the cap last; a command's own
-// params take orders from 10. A tunnel's apply by its front (When): its
-// destination a forward's alone, its program a terminal's. A reverse
-// tunnel has one front, forward (fronts nil): no param names it, and its
-// destination is required. What is seldom changed is Advanced.
+// VPN's routes, a forward's destination, when core stops it idle
+// (stop_idle) and the bandwidth cap. They carry no num. They come first in
+// a tunnel's form, after where a reverse tunnel listens (its command's
+// bind, listen and udp: orders 1 to 3), and stop_idle and the cap last; a
+// command's own params take orders from 10. A tunnel's apply by its front
+// (When): its port every front's but a VPN's (whose client comes over
+// core's own address), its routes a VPN's, its destination a forward's
+// alone, its program a terminal's. A reverse tunnel has one front, forward
+// (fronts nil): no param names it, and its destination is required. What
+// is seldom changed is Advanced.
 func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 	reverse := action == ActionReverseTunnel
 	order := 0
@@ -267,7 +280,12 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 			FieldSpec{Key: ParamFront, Type: FieldEnum, Label: "Front", Default: fronts[0].Value, Options: fronts, Order: next(),
 				Description: "What core puts in front of the tunnel."},
 			FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
-				Description: "The operational port core listens on: 0 for any free one."})
+				Description: "The operational port core listens on: 0 for any free one.",
+				When:        on(FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal)},
+			FieldSpec{Key: ParamRoutes, Type: FieldStringList, Label: "Routes", Required: true, MaxItems: MaxTunnelRoutes,
+				MaxLength: maxTunnelRoute, Order: next(),
+				Description: "The networks logos-vpn routes on the operator's machine, as CIDRs (10.0.0.0/24, fd00:1::/64): every tool there reaches them through the minion. They can be changed while the tunnel runs.",
+				When:        on(FrontVPN)})
 	}
 	out = append(out,
 		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", Required: reverse, MaxLength: MaxTunnelHost, Order: next(),
@@ -282,7 +300,7 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 				When:        on(FrontForward)},
 			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(), Advanced: true,
 				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes.",
-				When:        on(FrontSOCKS, FrontHTTP, FrontForward)},
+				When:        on(FrontSOCKS, FrontHTTP, FrontForward, FrontVPN)},
 			FieldSpec{Key: ParamTLS, Type: FieldBool, Label: "TLS to the destination", Default: false, Order: next(),
 				Description: "The minion speaks TLS to the destination (it checks no certificate), the tools plain: a host and a port's, not a path's.",
 				When:        on(FrontForward)},
@@ -353,7 +371,8 @@ var actions = map[string]CommandAction{
 		{Value: FrontSOCKS, Label: "SOCKS proxy", Description: "SOCKS5 (connect, UDP associate), SOCKS4 and 4a: each tool says where each connection goes."},
 		{Value: FrontHTTP, Label: "HTTP proxy", Description: "CONNECT, and plain requests: for the tools that speak no SOCKS."},
 		{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."},
-		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."}})},
+		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."},
+		{Value: FrontVPN, Label: "VPN", Description: "logos-vpn routes an operator's machine into the minion's networks: every tool there, scans and pings too."}})},
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt, "udp": FieldBool},
 		Adds: tunnelCoreParams(ActionReverseTunnel, nil)},
 }

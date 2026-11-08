@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -103,11 +105,16 @@ const (
 	// TunnelAcceptWait is how long an accept waits for its connection: none
 	// in that time, and the minion closes the stream (reset).
 	TunnelAcceptWait = 2 * time.Minute
+	// MaxTunnelRoutes bounds a VPN's routes (ParamRoutes).
+	MaxTunnelRoutes = 64
+	// maxTunnelRoute is the longest a route is written: an IPv6 address's
+	// eight groups and /128.
+	maxTunnelRoute = 43
 )
 
 // What an open opens (TunnelItem.Kind): a TCP connection when it says none
 // (a UDP association by its UDP), else a unix socket or a named pipe, to
-// its Path, a process, or a listener for one connection.
+// its Path, a process, a listener for one connection, or pings.
 const (
 	// TunnelKindUnix: a unix domain socket, a path ("/var/run/docker.sock")
 	// or an abstract name ("@name"); Linux's and Windows' alike.
@@ -131,6 +138,13 @@ const (
 	// tunnel_ctl who came (within TunnelAcceptWait), then the stream is
 	// that connection's.
 	TunnelKindAccept = 4
+	// TunnelKindICMP: pings from the minion's host (OpenICMP), opened as a
+	// UDP association is, naming no host and no port: its datagrams are
+	// ICMP messages (ReadICMP), core's echo requests to the host each names
+	// (port 0), the minion's what answered them, from the address that
+	// did. The minion sends them from an unprivileged ICMP socket where its
+	// host allows one, else a raw one; with neither it answers TunnelDenied.
+	TunnelKindICMP = 5
 )
 
 // TunnelPathKind is the kind of open a path names: a named pipe when it
@@ -193,7 +207,7 @@ func (t TunnelItem) Validate() error {
 		return err
 	}
 	switch {
-	case t.Kind < 0 || t.Kind > TunnelKindAccept:
+	case t.Kind < 0 || t.Kind > TunnelKindICMP:
 		return fmt.Errorf("tunnel: kind %d is not one this version opens", t.Kind)
 	case t.Kind != 0 && t.UDP:
 		return errors.New("tunnel: udp is a host and port's, with no kind")
@@ -219,6 +233,11 @@ func (t TunnelItem) Validate() error {
 		}
 		if err := TunnelProcess(t.Path, t.Args, t.Rows, t.Cols); err != nil {
 			return err
+		}
+		return tunnelRoom("tunnel", t.Room)
+	case TunnelKindICMP:
+		if t.Host != "" || t.Port != 0 || t.Path != "" {
+			return errors.New("tunnel: an icmp stream names no host, port or path: each datagram names its host")
 		}
 		return tunnelRoom("tunnel", t.Room)
 	case TunnelKindAccept:
@@ -613,7 +632,8 @@ func (c TunnelCloseItem) Validate() error {
 // → minion to Host:Port, the destination; minion → core from Host:Port, the
 // source. In a UDP reverse port forward the stream's source is both: the
 // minion's from it, core's to it (the minion sends them from its
-// listener).
+// listener). An icmp stream's (TunnelKindICMP) name a host and port 0, its
+// data an ICMP message (ReadICMP).
 type TunnelDatagramItem struct {
 	T      int    `cbor:"0,keyasint"`
 	Task   []byte `cbor:"1,keyasint"`
@@ -628,12 +648,17 @@ type TunnelDatagramItem struct {
 	Data []byte `cbor:"6,keyasint"`
 }
 
-// Validate checks the task, the stream, the address and the size.
+// Validate checks the task, the stream, the address (port 0 an icmp
+// stream's, which its receiver checks by the stream) and the size.
 func (d TunnelDatagramItem) Validate() error {
 	if err := tunnelStream("tunnel_datagram", d.Task, d.Stream); err != nil {
 		return err
 	}
-	if err := tunnelPeer("tunnel_datagram", d.Host, d.Port); err != nil {
+	port := d.Port
+	if port == 0 {
+		port = 1
+	}
+	if err := tunnelPeer("tunnel_datagram", d.Host, port); err != nil {
 		return err
 	}
 	if len(d.Data) > MaxTunnelDatagram {
@@ -807,4 +832,77 @@ func tunnelMsg(item, msg string) error {
 		return fmt.Errorf("%s: msg is UTF-8", item)
 	}
 	return nil
+}
+
+// TunnelRoutes reads a VPN's routes (ParamRoutes): 1 to MaxTunnelRoutes
+// networks as CIDRs, IPv4 or IPv6 (10.0.0.0/24, fd00:1::/64), each a network
+// (no host bits: 10.0.0.5/24 is refused, naming 10.0.0.0/24), none twice. A
+// default route (0.0.0.0/0, ::/0) is refused, as are loopback, link-local,
+// multicast and unspecified networks, and an IPv4 one written as IPv6: a
+// route the client would take the machine's own traffic into, or one no
+// minion's network has.
+func TunnelRoutes(routes []string) ([]netip.Prefix, error) {
+	switch {
+	case len(routes) == 0:
+		return nil, errors.New("routes: a network at least, as a CIDR (10.0.0.0/24)")
+	case len(routes) > MaxTunnelRoutes:
+		return nil, fmt.Errorf("routes: %d at most", MaxTunnelRoutes)
+	}
+	out := make([]netip.Prefix, 0, len(routes))
+	for _, r := range routes {
+		p, err := netip.ParsePrefix(strings.TrimSpace(r))
+		if err != nil {
+			return nil, fmt.Errorf("routes: %q is not a network as a CIDR (10.0.0.0/24)", r)
+		}
+		if err := tunnelRoute(p); err != nil {
+			return nil, fmt.Errorf("routes: %s %w", p, err)
+		}
+		if slices.Contains(out, p) {
+			return nil, fmt.Errorf("routes: %s twice", p)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// tunnelRoute says what is wrong with a route, as the end of a sentence.
+func tunnelRoute(p netip.Prefix) error {
+	a := p.Addr()
+	switch {
+	case a.Is4In6():
+		return errors.New("is an IPv4 network written as IPv6: write it as IPv4")
+	case p.Bits() == 0:
+		return errors.New("is a default route: the client's own link to core would go into the tunnel")
+	case p.Masked() != p:
+		return fmt.Errorf("has host bits: the network is %s", p.Masked())
+	case a.IsUnspecified(), a.IsLoopback(), a.IsLinkLocalUnicast(), a.IsMulticast(), a.IsLinkLocalMulticast(),
+		a.IsInterfaceLocalMulticast():
+		return errors.New("is no network a minion's host reaches: loopback, link-local, multicast or unspecified")
+	}
+	for _, own := range ownNetworks {
+		if own.Overlaps(p) {
+			return fmt.Errorf("holds %s: loopback, link-local or multicast addresses, the machine's own", own)
+		}
+	}
+	return nil
+}
+
+// ownNetworks are what a route may not hold: each machine's own (this
+// network, loopback, link-local, multicast and the reserved rest).
+var ownNetworks = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("224.0.0.0/3"),
+	netip.MustParsePrefix("::/127"), netip.MustParsePrefix("fe80::/10"), netip.MustParsePrefix("ff00::/8"),
+}
+
+// TunnelRouted reports whether addr is in one of routes: an IPv4 address
+// written as IPv6 (::ffff:10.0.0.5) as its IPv4 one.
+func TunnelRouted(routes []netip.Prefix, addr netip.Addr) bool {
+	addr = addr.Unmap()
+	for _, p := range routes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
