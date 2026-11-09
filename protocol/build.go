@@ -70,10 +70,20 @@ type BuildSchema struct {
 	// need a new version.
 	Version  int            `json:"version"`
 	Channels []BuildChannel `json:"channels"`
-	// Crypto is the payload crypto suite the minions implement; core
-	// generates the keys for it. Optional; core refuses a registration whose
-	// suite it does not implement.
+	// Crypto is the payload crypto suite the minions implement: core's
+	// (CoreSuites), whose keys core makes, or the factory's own,
+	// "<module_name>.<name>", which the factory translates and makes the
+	// keys of (codecs.go). Optional; core refuses a registration naming a
+	// suite it does not implement, or another module's.
 	Crypto string `json:"crypto,omitempty"`
+	// Envelope is how the minions write a message as plaintext: core's
+	// (CoreEnvelopes), EnvelopeCBOR when none, or the factory's own,
+	// "<module_name>.<name>", which the factory translates.
+	Envelope string `json:"envelope,omitempty"`
+	// Codec is what the factory declares of the layers it translates:
+	// required when the schema or a target names a suite or an envelope
+	// of the factory's own, refused otherwise.
+	Codec *BuildCodec `json:"codec,omitempty"`
 	// Fields are the build parameters every target shares.
 	Fields  []FieldSpec   `json:"fields,omitempty"`
 	Targets []BuildTarget `json:"targets"`
@@ -177,6 +187,11 @@ type BuildTarget struct {
 	// for a platform that has less (a Linux build has no named pipes):
 	// empty means all of them (CommandOpens).
 	Opens []string `json:"opens,omitempty"`
+	// Crypto and Envelope replace the schema's for this target's builds
+	// (BuildSchema.TargetCodec): one factory may build a minion in a
+	// compiled language and one in a script.
+	Crypto   string `json:"crypto,omitempty"`
+	Envelope string `json:"envelope,omitempty"`
 }
 
 // BuildCommand is a command a factory's minions can be built with. An
@@ -437,9 +452,6 @@ func ValidateBuildSchema(s BuildSchema) error {
 		}
 	}
 
-	if s.Crypto != "" && !cryptoSuitePattern.MatchString(s.Crypto) {
-		return fmt.Errorf("crypto suite %q must match %s", s.Crypto, cryptoSuitePattern)
-	}
 	for i, c := range s.Compression {
 		if !IsCompression(c) {
 			return fmt.Errorf("compression %q: the protocol has %v", c, Compressions)
@@ -472,6 +484,10 @@ func ValidateBuildSchema(s BuildSchema) error {
 			return fmt.Errorf("duplicate target %q", t.ID)
 		}
 		ids[t.ID] = true
+	}
+
+	if err := validateCodecs(s); err != nil {
+		return err
 	}
 
 	if len(s.Commands) > MaxBuildCommands {

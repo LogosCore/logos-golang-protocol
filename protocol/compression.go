@@ -60,9 +60,25 @@ var (
 
 // Pack is item packed when that pays: PackMinSize bytes or more, and its
 // deflated form at least an eighth smaller. Otherwise, and for an item that
-// is packed already, it is item itself, and packed is false.
+// is packed already, it is item itself, and packed is false. The item is
+// written in CBOR: PackIn for another envelope.
 func Pack(item cbor.RawMessage) (out cbor.RawMessage, packed bool, err error) {
-	if len(item) < PackMinSize || ItemType(item) == ItemPacked {
+	return PackIn(CBOREnvelope, item)
+}
+
+// PackIn is Pack for a message env writes: the packed item holds the item
+// as env writes it, deflated, and both sizes are env's (a packed item's
+// data is base64 in JSON). The packed item is the protocol's form, CBOR,
+// as the item is.
+func PackIn(env MessageEnvelope, item cbor.RawMessage) (out cbor.RawMessage, packed bool, err error) {
+	if ItemType(item) == ItemPacked {
+		return item, false, nil
+	}
+	written, err := env.WriteItem(item)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(written) < PackMinSize {
 		return item, false, nil
 	}
 	var buf bytes.Buffer
@@ -70,7 +86,7 @@ func Pack(item cbor.RawMessage) (out cbor.RawMessage, packed bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if _, err := w.Write(item); err != nil {
+	if _, err := w.Write(written); err != nil {
 		return nil, false, err
 	}
 	if err := w.Close(); err != nil {
@@ -80,7 +96,11 @@ func Pack(item cbor.RawMessage) (out cbor.RawMessage, packed bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if len(p) > len(item)-len(item)/PackMinSaving {
+	pw, err := env.WriteItem(p)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(pw) > len(written)-len(written)/PackMinSaving {
 		return item, false, nil
 	}
 	return p, true, nil
@@ -89,8 +109,15 @@ func Pack(item cbor.RawMessage) (out cbor.RawMessage, packed bool, err error) {
 // Unpack is the item a packed item holds, inflated into room bytes at most
 // (the room its message has left: UnpackRoom). ErrPackedTooLarge past it;
 // ErrPackedBad for one that does not read or inflate, or holds no single
-// item of the protocol, or another packed one.
+// item of the protocol, or another packed one. The message is CBOR:
+// UnpackIn for another envelope.
 func Unpack(raw cbor.RawMessage, room int) (cbor.RawMessage, error) {
+	return UnpackIn(CBOREnvelope, raw, room)
+}
+
+// UnpackIn is Unpack for a message env wrote: the item inflates to env's
+// form, within room bytes of it, and is read back as CBOR.
+func UnpackIn(env MessageEnvelope, raw cbor.RawMessage, room int) (cbor.RawMessage, error) {
 	var p PackedItem
 	if err := UnmarshalCBOR(raw, &p); err != nil || p.T != ItemPacked {
 		return nil, ErrPackedBad
@@ -100,12 +127,16 @@ func Unpack(raw cbor.RawMessage, room int) (cbor.RawMessage, error) {
 	}
 	r := flate.NewReader(bytes.NewReader(p.Data))
 	defer func() { _ = r.Close() }()
-	inner, err := io.ReadAll(io.LimitReader(r, int64(max(room, 0))+1))
+	written, err := io.ReadAll(io.LimitReader(r, int64(max(room, 0))+1))
 	switch {
 	case err != nil:
 		return nil, fmt.Errorf("%w: %v", ErrPackedBad, err)
-	case len(inner) > room:
+	case len(written) > room:
 		return nil, ErrPackedTooLarge
+	}
+	inner, err := env.ReadItem(written)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPackedBad, err)
 	}
 	switch t := ItemType(inner); t {
 	case 0, ItemPacked:
@@ -119,11 +150,26 @@ func Unpack(raw cbor.RawMessage, room int) (cbor.RawMessage, error) {
 // UnpackRoom is the room item i of items may inflate into: the message's
 // limit less the items before it.
 func UnpackRoom(items []cbor.RawMessage, i int) int {
+	return UnpackRoomIn(CBOREnvelope, items, i)
+}
+
+// UnpackRoomIn is UnpackRoom with the items before i counted as env writes
+// them.
+func UnpackRoomIn(env MessageEnvelope, items []cbor.RawMessage, i int) int {
 	room := MaxMinionMessageSize
 	for _, it := range items[:min(i, len(items))] {
-		room -= len(it)
+		room -= writtenSize(env, it)
 	}
 	return room
+}
+
+// writtenSize is how large env writes item: its CBOR size when it does
+// not write it.
+func writtenSize(env MessageEnvelope, item cbor.RawMessage) int {
+	if w, err := env.WriteItem(item); err == nil {
+		return len(w)
+	}
+	return len(item)
 }
 
 // UnpackItems takes the packed items of a message in their places, in
@@ -131,12 +177,22 @@ func UnpackRoom(items []cbor.RawMessage, i int) int {
 // unpack stays as it is: its receiver answers it (UnpackRoom and Unpack
 // again say why), so a message's items keep their indexes.
 func UnpackItems(items []cbor.RawMessage) {
+	UnpackItemsIn(CBOREnvelope, items)
+}
+
+// UnpackItemsIn is UnpackItems for a message env wrote (UnpackRoomIn and
+// UnpackIn say why one stays packed).
+func UnpackItemsIn(env MessageEnvelope, items []cbor.RawMessage) {
+	if !slices.ContainsFunc(items, func(it cbor.RawMessage) bool { return ItemType(it) == ItemPacked }) {
+		return
+	}
+	room := MaxMinionMessageSize
 	for i, raw := range items {
-		if ItemType(raw) != ItemPacked {
-			continue
+		if ItemType(raw) == ItemPacked {
+			if inner, err := UnpackIn(env, raw, room); err == nil {
+				items[i] = inner
+			}
 		}
-		if inner, err := Unpack(raw, UnpackRoom(items, i)); err == nil {
-			items[i] = inner
-		}
+		room -= writtenSize(env, items[i])
 	}
 }

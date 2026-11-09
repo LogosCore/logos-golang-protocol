@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -151,8 +152,14 @@ type BuildRequest struct {
 	// target's values', the connections' values' and their endpoints'
 	// params'. Secret, as values are: for the build only.
 	Credentials map[string]Credential `json:"credentials,omitempty"`
-	// Crypto is set when the factory declares a crypto suite.
+	// Crypto is set when the target's builds have a crypto suite
+	// (BuildSchema.TargetCodec): the suite and the minion's key material.
+	// For a suite of the factory's own, the material is what the factory
+	// made for the build (FactoryKeysForBuild), as base64.
 	Crypto *BuildCrypto `json:"crypto,omitempty"`
+	// Envelope is the target's envelope (BuildSchema.TargetCodec), omitted
+	// for EnvelopeCBOR.
+	Envelope string `json:"envelope,omitempty"`
 	// SessionID is the persisted session the minion claims in its hello, a
 	// lowercase UUID; set only for a factory that declares
 	// BuildSchema.PersistedSessions. The factory builds it in.
@@ -436,13 +443,20 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		}
 	}
 
+	codec := Codec{Suite: s.Crypto, Envelope: s.Envelope}
+	if ok {
+		codec = s.TargetCodec(t)
+	}
 	switch {
-	case s.Crypto == "" && r.Crypto != nil:
-		add("crypto", "the factory declares no crypto suite")
-	case s.Crypto != "" && r.Crypto == nil:
-		add("crypto", "required: the factory declares a crypto suite")
-	case r.Crypto != nil && r.Crypto.Suite != s.Crypto:
-		add("crypto", "suite %q is not the factory's %q", r.Crypto.Suite, s.Crypto)
+	case codec.Suite == "" && r.Crypto != nil:
+		add("crypto", "the target's builds have no crypto suite")
+	case codec.Suite != "" && r.Crypto == nil:
+		add("crypto", "required: the target's builds have crypto suite %q", codec.Suite)
+	case r.Crypto != nil && r.Crypto.Suite != codec.Suite:
+		add("crypto", "suite %q is not the target's %q", r.Crypto.Suite, codec.Suite)
+	}
+	if got, want := cmp.Or(r.Envelope, EnvelopeCBOR), cmp.Or(codec.Envelope, EnvelopeCBOR); got != want {
+		add("envelope", "%q is not the target's %q", got, want)
 	}
 
 	if !isAbsoluteURL(r.Artifact.UploadURL) {
