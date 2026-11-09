@@ -21,6 +21,14 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # Minions are built for 32-bit platforms too (windows/386, linux/386):
+      # the package must compile where int is 32 bits.
+      - name: Build for 32-bit
+        run: |
+          GOARCH=386 go vet ./...
+          GOOS=windows GOARCH=386 go build ./...
+          GOARCH=arm go build ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

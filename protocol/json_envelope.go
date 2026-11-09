@@ -255,7 +255,7 @@ func (s *shape) field(key any) *shape {
 const maxJSONInt = 1<<53 - 1
 
 var (
-	errJSONInt = fmt.Errorf("an integer is within ±%d", maxJSONInt)
+	errJSONInt = fmt.Errorf("an integer is within ±%d", int64(maxJSONInt))
 	// decimalName is a name that is a number in decimal, a numbered key.
 	decimalName = regexp.MustCompile(`^(0|[1-9][0-9]{0,15})$`)
 )
