@@ -97,6 +97,12 @@ type BuildSchema struct {
 	// many as its factory made it (one at a time, say), which its hello may
 	// report but core never changes.
 	MaxTasks bool `json:"max_tasks,omitempty"`
+	// Compression are the algorithms the minions inflate (Compressions:
+	// CompressionDeflate): core packs items for a minion of a build with
+	// compression on (BuildRequest.Compression), on by default, and the
+	// minion may pack its own. Optional: without it, core packs nothing
+	// for its minions.
+	Compression []string `json:"compression,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection
@@ -433,6 +439,14 @@ func ValidateBuildSchema(s BuildSchema) error {
 
 	if s.Crypto != "" && !cryptoSuitePattern.MatchString(s.Crypto) {
 		return fmt.Errorf("crypto suite %q must match %s", s.Crypto, cryptoSuitePattern)
+	}
+	for i, c := range s.Compression {
+		if !IsCompression(c) {
+			return fmt.Errorf("compression %q: the protocol has %v", c, Compressions)
+		}
+		if slices.Contains(s.Compression[:i], c) {
+			return fmt.Errorf("compression %q named twice", c)
+		}
 	}
 
 	if len(s.Fields) > MaxBuildTargetFields {

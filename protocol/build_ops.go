@@ -161,8 +161,13 @@ type BuildRequest struct {
 	// (it takes none until core says otherwise) to MaxTasksLimit; set only
 	// for a factory that declares BuildSchema.MaxTasks, nil meaning
 	// DefaultMaxTasks.
-	MaxTasks *uint64        `json:"max_tasks,omitempty"`
-	Artifact ArtifactUpload `json:"artifact"`
+	MaxTasks *uint64 `json:"max_tasks,omitempty"`
+	// Compression is the algorithm the minion packs and inflates
+	// (CompressionDeflate), for a factory that declares
+	// BuildSchema.Compression; "" when the operator turned it off, or the
+	// factory declares none. The factory builds it in.
+	Compression string         `json:"compression,omitempty"`
+	Artifact    ArtifactUpload `json:"artifact"`
 	// Deadline is when core stops waiting for the result.
 	Deadline time.Time `json:"deadline"`
 	Actor    *Actor    `json:"actor,omitempty"`
