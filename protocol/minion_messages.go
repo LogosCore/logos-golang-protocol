@@ -106,6 +106,9 @@ const (
 	ItemTunnelDatagram = 26
 	ItemTunnelListen   = 27
 	ItemTunnelCtl      = 28
+	// ItemDelegate: one step of what a delegate carries for the minions it
+	// serves (DelegateItem; both ways, delegation.go).
+	ItemDelegate = 29
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -117,7 +120,7 @@ var itemNames = map[int]string{
 	ItemPoll: "poll", ItemMaxTasks: "max_tasks", ItemFeedback: "feedback", ItemReack: "reack",
 	ItemIdentity: "identity", ItemTunnel: "tunnel", ItemTunnelReply: "tunnel_reply", ItemTunnelData: "tunnel_data",
 	ItemTunnelAck: "tunnel_ack", ItemTunnelClose: "tunnel_close", ItemTunnelDatagram: "tunnel_datagram",
-	ItemTunnelListen: "tunnel_listen", ItemTunnelCtl: "tunnel_ctl",
+	ItemTunnelListen: "tunnel_listen", ItemTunnelCtl: "tunnel_ctl", ItemDelegate: "delegate",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does

@@ -222,6 +222,13 @@ type BuildCommand struct {
 	// command that opens no udp is refused at once. Only a tunnel command
 	// says it (CanOpen); a target may narrow it (BuildTarget.Opens).
 	Opens []string `json:"opens,omitempty"`
+	// Serves are the channel kinds a delegate command's minion serves
+	// (delegation.go): the channel's side of each transport, for the
+	// minions of its operation, while its task runs. Bind kinds for
+	// ActionDelegate, reverse ones for ActionReverseDelegate; only a
+	// delegate command says it, and one must. A factory that serves other
+	// kinds on another target declares another command (Targets).
+	Serves []ChannelVersions `json:"serves,omitempty"`
 }
 
 // CanOpen reports whether the command's minion opens kind (OpenTCP,
@@ -592,6 +599,9 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 		}
 	}
 	if err := validateOpenParams(c); err != nil {
+		return err
+	}
+	if err := validateServes(c); err != nil {
 		return err
 	}
 	if len(c.Params) > MaxCommandParams {

@@ -73,6 +73,14 @@ type ConnectionSchema struct {
 // it and its own limit, and says the result as the call's deadline
 // (LinkFrame.Deadline).
 //
+// DelegatedOnly says no instance of the channel carries the kind: only
+// delegates do (delegation.go), minions serving its transport on their
+// hosts. Core sends no call or open of the kind to the channel's
+// instances, and a target of it names a delegate. A channel may declare a
+// transport it cannot carry from where it runs, and drop the flag in a
+// release that carries it. Never with Agentless: agentless kinds are not
+// delegated.
+//
 // MaxOpen, for bind-persistent only, is the same for an open: how long the
 // channel may take to open a connection of the kind (a dial, a login), as
 // a duration, MinOpenLimit to MaxOpenLimit. Core waits as long again for
@@ -86,6 +94,8 @@ type ConnectionKind struct {
 	Agentless  bool        `json:"agentless,omitempty"`
 	MaxCall    string      `json:"max_call,omitempty"`
 	MaxOpen    string      `json:"max_open,omitempty"`
+	// DelegatedOnly: only delegates carry the kind.
+	DelegatedOnly bool `json:"delegated_only,omitempty"`
 }
 
 // The bounds of a kind's MaxCall and MaxOpen.
@@ -194,6 +204,13 @@ func (s ConnectionSchema) IsAgentless(kind string) bool {
 	return s.Kinds[kind].Agentless
 }
 
+// IsDelegatedOnly reports whether only delegates carry connections of kind
+// (ConnectionKind.DelegatedOnly); false for a kind the channel does not
+// carry.
+func (s ConnectionSchema) IsDelegatedOnly(kind string) bool {
+	return s.Kinds[kind].DelegatedOnly
+}
+
 // IsBindKind reports whether kind is one the channel dials (bind-call,
 // bind-persistent): its minions have targets.
 func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindBindPersistent }
@@ -224,6 +241,8 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			return fmt.Errorf("kinds.%s: only a bind kind has target fields", kind)
 		case k.Agentless && !bind:
 			return fmt.Errorf("kinds.%s: only a bind kind is agentless", kind)
+		case k.Agentless && k.DelegatedOnly:
+			return fmt.Errorf("kinds.%s: an agentless kind is not delegated", kind)
 		case k.MaxCall != "" && kind != KindBindCall:
 			return fmt.Errorf("kinds.%s: only a bind-call kind says max_call", kind)
 		case k.MaxOpen != "" && kind != KindBindPersistent:

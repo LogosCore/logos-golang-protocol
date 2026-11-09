@@ -106,7 +106,37 @@ const (
 	// minion never learns where core sends what comes. The same items, the streams the minion's
 	// (tunnels.go); no result; more params, each with a default.
 	ActionReverseTunnel = "reverse_tunnel"
+	// ActionDelegate makes the minion a delegate (delegation.go) for the
+	// bind kinds its command serves (BuildCommand.Serves) while its task
+	// runs: core sends it calls and opens for targets that name its
+	// session, and it calls or dials each target as the channel would,
+	// carrying what comes back in delegate items. Core starts one itself
+	// when a target needs it and none runs, so the command's params all
+	// have defaults; core adds stop_idle (1h). No result.
+	ActionDelegate = "delegate"
+	// ActionReverseDelegate makes the minion a delegate for the reverse
+	// kinds its command serves while its task runs: it listens as its
+	// command's own params say (a transport's server side is its
+	// channel's business, never in a connection schema) and carries the
+	// requests and connections minions bring. An operator starts it; core
+	// adds stop_idle (never). No result.
+	ActionReverseDelegate = "reverse_delegate"
 )
+
+// DelegateActions are the delegate actions: a task of a command with one
+// makes its minion an instance of the channel kinds it serves. Such a
+// task holds none of the minion's max_tasks, as a tunnel's does not.
+func DelegateActions() []string {
+	return []string{ActionDelegate, ActionReverseDelegate}
+}
+
+// IsDelegateAction reports whether action is one of DelegateActions.
+func IsDelegateAction(action string) bool { return slices.Contains(DelegateActions(), action) }
+
+// HoldsNoSlot reports whether a task of action holds none of the minion's
+// max_tasks: a tunnel's or a delegate's, which runs as long as what it
+// lends, a capability rather than work.
+func HoldsNoSlot(action string) bool { return IsTunnelAction(action) || IsDelegateAction(action) }
 
 // TunnelActions are the tunnel actions: a task of a command with one
 // carries streams as tunnel items, whatever core puts in front of them.
@@ -351,6 +381,10 @@ type CommandAction struct {
 	// cap): a factory declares none of them, they carry no num, so a task
 	// never takes them to the minion, and core reads them alone.
 	Adds []FieldSpec
+	// ByOperator: core never runs a command of the action on its own (a
+	// reverse delegate listens where an operator says), so the command's
+	// own params need no defaults.
+	ByOperator bool
 }
 
 // IsCoreParam reports whether key is core's alone in action's commands: a
@@ -382,6 +416,11 @@ var actions = map[string]CommandAction{
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt},
 		ByOpen: map[string]map[string]FieldType{OpenUDP: {"udp": FieldBool}},
 		Adds:   tunnelCoreParams(ActionReverseTunnel, nil)},
+	ActionDelegate: {Adds: []FieldSpec{{Key: ParamStopIdle, Type: FieldDuration, Label: "Stop when idle for", Default: "1h",
+		Order: 999, Advanced: true, Description: "Core stops the delegate once nothing has gone through it this long: 0s never."}}},
+	ActionReverseDelegate: {ByOperator: true, Adds: []FieldSpec{{Key: ParamStopIdle, Type: FieldDuration, Label: "Stop when idle for",
+		Default: "0s", Order: 999, Advanced: true,
+		Description: "Core stops the delegate once nothing has gone through it this long: 0s never, the default: minions may come at any time."}}},
 }
 
 // actionParam reports whether key is one of the action's own params in c:
@@ -455,7 +494,7 @@ func validateResultAction(c BuildCommand) error {
 		if slices.ContainsFunc(spec.Adds, func(a FieldSpec) bool { return a.Key == p.Key }) {
 			return fmt.Errorf("param %q is core's: core adds it to every %s command, and a factory declares none", p.Key, c.Action)
 		}
-		if !actionParam(spec, c, p.Key) && p.Default == nil {
+		if !actionParam(spec, c, p.Key) && p.Default == nil && !spec.ByOperator {
 			return fmt.Errorf("param %q needs a default: core runs a %s command with the action's params alone", p.Key, c.Action)
 		}
 	}
