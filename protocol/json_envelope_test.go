@@ -72,11 +72,29 @@ func roundTrip(t *testing.T, items ...any) string {
 		if err := UnmarshalCBOR(m.Items[i], got.Interface()); err != nil {
 			t.Fatalf("item %d: %v", i, err)
 		}
-		if !reflect.DeepEqual(got.Elem().Interface(), it) {
-			t.Fatalf("item %d:\n got %#v\nwant %#v\njson %s", i, got.Elem().Interface(), it, js)
+		if g := got.Elem().Interface(); !reflect.DeepEqual(g, it) && !sameCBOR(t, g, it) {
+			t.Fatalf("item %d:\n got %#v\nwant %#v\njson %s", i, g, it, js)
 		}
 	}
 	return string(js)
+}
+
+// sameCBOR says whether two items are the same CBOR values, a map's keys in
+// any order: MarshalCBOR writes them in Go's map order, which is random, and
+// a RawMessage keeps the order it was written in, so a result's data read
+// back from JSON can differ byte for byte from the one written.
+func sameCBOR(t *testing.T, a, b any) bool {
+	t.Helper()
+	// The library's own decoder: UnmarshalCBOR reads open maps with text
+	// keys alone, and a result's data has numbered ones.
+	var x, y any
+	if err := cbor.Unmarshal(mustCBOR(t, a), &x); err != nil {
+		t.Fatal(err)
+	}
+	if err := cbor.Unmarshal(mustCBOR(t, b), &y); err != nil {
+		t.Fatal(err)
+	}
+	return reflect.DeepEqual(x, y)
 }
 
 func TestJSONEnvelopeItemsRoundTrip(t *testing.T) {
