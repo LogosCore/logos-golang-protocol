@@ -17,7 +17,7 @@ import (
 // factory.build to a factory instance's rpc_queue and the factory accepts it
 // at once, with its plan for the build: the steps it will go through. While
 // it works it reports the step it is on to core on logos.core.rpc; when it is
-// done it uploads the artifact to a presigned URL and sends
+// done it uploads the artifact to core (ArtifactUpload) and sends
 // factory.build.result. Core can stop a build with factory.build.cancel. All
 // four operations are request/reply.
 
@@ -111,7 +111,8 @@ type BuildCrypto struct {
 
 // ArtifactUpload says where a factory uploads the artifact.
 type ArtifactUpload struct {
-	// UploadURL is a presigned upload URL, valid until the deadline.
+	// UploadURL is where the factory PUTs the artifact: a link (IsLink),
+	// core's own signed path valid until a minute past the deadline.
 	UploadURL string `json:"upload_url"`
 	// MaxSize is the largest artifact core accepts, in bytes.
 	MaxSize int64 `json:"max_size"`
@@ -459,8 +460,8 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		add("envelope", "%q is not the target's %q", got, want)
 	}
 
-	if !isAbsoluteURL(r.Artifact.UploadURL) {
-		add("artifact.upload_url", "must be an absolute URL")
+	if !IsLink(r.Artifact.UploadURL) {
+		add("artifact.upload_url", "must be a path on core's address or an absolute URL")
 	}
 	if r.Artifact.MaxSize <= 0 {
 		add("artifact.max_size", "must be positive")
@@ -512,15 +513,25 @@ func validateRequestFile(id string, f BuildFile) error {
 		return fmt.Errorf("size must not be negative")
 	case !sha256Pattern.MatchString(f.SHA256):
 		return fmt.Errorf("sha256 must be 64 lowercase hex digits")
-	case !isAbsoluteURL(f.URL):
-		return fmt.Errorf("url must be an absolute URL")
+	case !IsLink(f.URL):
+		return fmt.Errorf("url must be a path on core's address or an absolute URL")
 	}
 	return nil
 }
 
-func isAbsoluteURL(s string) bool {
+// IsLink reports whether s is a link a factory can follow: a path on the
+// address the factory reaches core at (core's own transfer endpoints, such
+// as /api/factory/builds/{build}/artifact?...), or an absolute URL. A path
+// is never protocol-relative ("//host/..."): it names nothing but core.
+func IsLink(s string) bool {
 	u, err := url.Parse(s)
-	return err == nil && u.Scheme != "" && u.Host != ""
+	if err != nil {
+		return false
+	}
+	if strings.HasPrefix(s, "/") {
+		return !strings.HasPrefix(s, "//") && u.Scheme == "" && u.Host == ""
+	}
+	return u.Scheme != "" && u.Host != ""
 }
 
 // Validate checks a progress report's fields.

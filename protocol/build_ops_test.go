@@ -40,11 +40,11 @@ const (
       "id": "0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55", "name": "app.ico", "size": 4286,
       "sha256": "9f2c41d0e5a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2",
       "media_type": "image/x-icon",
-      "url": "http://logos-seaweedfs-s3:8333/…?X-Amz-Signature=…"
+      "url": "/api/factory/builds/5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f/files/0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55?expires=1793025060&sig=…"
     }
   },
   "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "…": "…" } },
-  "artifact": { "upload_url": "http://logos-seaweedfs-s3:8333/…?X-Amz-Signature=…", "max_size": 268435456 },
+  "artifact": { "upload_url": "/api/factory/builds/5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f/artifact?expires=1793025060&sig=…", "max_size": 268435456 },
   "deadline": "2026-10-26T14:30:00Z",
   "actor": { "type": "user", "id": "f140266c-…", "name": "admin" }
 }`
@@ -152,7 +152,8 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		{"values.icon", file(func(f *BuildFile) { f.Name, f.MediaType = "app.png", "image/png" })},
 		{"files." + iconID, file(func(f *BuildFile) { f.SHA256 = "9f2c…" })},
 		{"files." + iconID, file(func(f *BuildFile) { f.ID = "another-file" })},
-		{"files." + iconID, file(func(f *BuildFile) { f.URL = "/build-files/app.ico" })},
+		{"files." + iconID, file(func(f *BuildFile) { f.URL = "build-files/app.ico" })},
+		{"files." + iconID, file(func(f *BuildFile) { f.URL = "//store.test/app.ico" })},
 		{"connections", func(r *BuildRequest) { r.Connections = nil }},
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Format = "logos.channel-endpoint.v1" }},
 		{"connections[0].kind", func(r *BuildRequest) { r.Connections[0].Endpoint.Kind = KindBindCall }},
@@ -277,7 +278,7 @@ func TestValidateBuildRequest_ConnectionFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Files["cert-1"] = BuildFile{ID: "cert-1", Name: "client.pem", Size: 1200,
-		SHA256: strings.Repeat("0a", 32), URL: "http://logos-seaweedfs-s3:8333/cert-1"}
+		SHA256: strings.Repeat("0a", 32), URL: "/api/factory/builds/b/files/cert-1"}
 	r.Connections[0].Values["client_cert"] = "cert-1"
 	if p := ValidateBuildRequest(s, r); p != nil {
 		t.Fatalf("file connection parameter: %v", p)
@@ -428,6 +429,23 @@ func TestBuildReply(t *testing.T) {
 	} {
 		if err := c.reply.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: want an error containing %q, got %v", name, c.want, err)
+		}
+	}
+}
+
+func TestIsLink(t *testing.T) {
+	for s, want := range map[string]bool{
+		"/api/factory/builds/b/artifact?expires=1&sig=ab":        true,
+		"https://core.example.com/api/factory/builds/b/artifact": true,
+		"http://store.test/files/f1?X-Amz-Signature=x":           true,
+		"":                        false,
+		"api/factory/builds/b":    false, // relative to nothing
+		"//store.test/files/f1":   false, // protocol-relative: names another host
+		"store.test:8333/files/1": false,
+		"/%zz":                    false,
+	} {
+		if got := IsLink(s); got != want {
+			t.Errorf("IsLink(%q) = %v, want %v", s, got, want)
 		}
 	}
 }

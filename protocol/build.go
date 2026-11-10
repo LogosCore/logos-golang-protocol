@@ -776,15 +776,16 @@ func validateBuildTarget(t BuildTarget, shared map[string]bool, channels map[str
 
 // BuildFile is a file an operator uploaded for a file field. Build values hold
 // its id; a factory.build request carries the file itself under files, with a
-// presigned URL to download it from.
+// link to download it from.
 type BuildFile struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256"` // lowercase hex
 	MediaType string `json:"media_type,omitempty"`
-	// URL is a presigned download URL, valid until the build's deadline. Set
-	// in a factory.build request only.
+	// URL is where the factory GETs the file: a link (IsLink), core's own
+	// signed path valid until a minute past the build's deadline. Set in a
+	// factory.build request only.
 	URL string `json:"url,omitempty"`
 }
 
