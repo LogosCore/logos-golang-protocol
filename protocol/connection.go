@@ -230,6 +230,7 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 	if len(s.Kinds) == 0 {
 		return errors.New("kinds: at least one")
 	}
+	kindFields := make([][]FieldSpec, 0, len(s.Kinds))
 	for _, kind := range slices.Sorted(maps.Keys(s.Kinds)) {
 		if !KnownKind(kind) {
 			return fmt.Errorf("kinds: %q is not a connection kind", kind)
@@ -274,8 +275,36 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			}
 			keys[f.Key] = true
 		}
+		for _, f := range append(slices.Clone(k.Fields), k.Target...) {
+			if f.Num == 0 {
+				return fmt.Errorf("kinds.%s: field %q: a num is required (its number in a minion config)", kind, f.Key)
+			}
+		}
+		// A kind's fields and its target's share one numbering: core gives
+		// a channel both in one map.
+		kindFields = append(kindFields, k.Fields, k.Target)
+	}
+	if err := checkFieldNumbers(kindFields...); err != nil {
+		return fmt.Errorf("kinds: %w", err)
 	}
 	return nil
+}
+
+// Numbered reports whether kind's fields are numbered (FieldSpec.Num), as a
+// minion config needs them; false for a kind the channel does not carry. A
+// schema registered under today's rules always is: a channel's numbers are
+// required.
+func (s ConnectionSchema) Numbered(kind string) bool {
+	k, ok := s.Kinds[kind]
+	if !ok {
+		return false
+	}
+	for _, f := range k.Fields {
+		if f.Num == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateConnectionValues checks values against kind's fields in s: every

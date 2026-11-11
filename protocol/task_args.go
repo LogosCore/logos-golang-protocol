@@ -179,6 +179,57 @@ func ArgInt[K comparable](args map[K]any, key K) (int64, bool) {
 	return 0, false
 }
 
+// ArgNumber is a task's number arg (a float; an integer reads too).
+func ArgNumber[K comparable](args map[K]any, key K) (float64, bool) {
+	switch n := args[key].(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	}
+	i, ok := ArgInt(args, key)
+	return float64(i), ok
+}
+
+// ArgStrings is a task's list arg (string_list, enum_list): its items, all
+// text.
+func ArgStrings[K comparable](args map[K]any, key K) ([]string, bool) {
+	switch v := args[key].(type) {
+	case []string:
+		return v, true
+	case []any:
+		out := make([]string, len(v))
+		for i, it := range v {
+			s, ok := it.(string)
+			if !ok {
+				return nil, false
+			}
+			out[i] = s
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// ArgStringMap is a task's string_map arg.
+func ArgStringMap[K comparable](args map[K]any, key K) (map[string]string, bool) {
+	switch v := args[key].(type) {
+	case map[string]string:
+		return v, true
+	case map[string]any:
+		out := make(map[string]string, len(v))
+		for k, it := range v {
+			s, ok := it.(string)
+			if !ok {
+				return nil, false
+			}
+			out[k] = s
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 // ArgDuration is a task's duration arg (milliseconds on the wire).
 func ArgDuration[K comparable](args map[K]any, key K) (time.Duration, bool) {
 	ms, ok := ArgInt(args, key)

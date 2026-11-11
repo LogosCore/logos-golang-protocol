@@ -9,18 +9,20 @@ import (
 
 func validConnection() ConnectionSchema {
 	shared := []FieldSpec{
-		{Key: "base_url", Type: FieldURL, Required: true, Pattern: `^https?://[^/?#\s]+$`},
-		{Key: "tls_verify", Type: FieldBool, Default: false},
-		{Key: "request_timeout", Type: FieldDuration, Default: "40s", Min: "35s"},
-		{Key: "headers", Type: FieldStringList},
+		{Key: "base_url", Num: 1, Type: FieldURL, Required: true, Pattern: `^https?://[^/?#\s]+$`},
+		{Key: "tls_verify", Num: 2, Type: FieldBool, Default: false},
+		{Key: "request_timeout", Num: 3, Type: FieldDuration, Default: "40s", Min: "35s"},
+		{Key: "headers", Num: 4, Type: FieldStringList},
 	}
 	return ConnectionSchema{
 		SchemaVersion: ConnectionSchemaV2,
 		Version:       1,
 		Kinds: map[string]ConnectionKind{
-			KindReverseCall:       {Fields: shared},
-			KindReversePersistent: {Fields: append(slices.Clone(shared), FieldSpec{Key: "ws_backoff", Type: FieldDuration, Default: "60s"})},
-			KindBindCall:          {Fields: []FieldSpec{{Key: "method", Type: FieldString}}, Target: []FieldSpec{{Key: "url", Type: FieldURL}}},
+			KindReverseCall: {Fields: shared},
+			KindReversePersistent: {Fields: append(slices.Clone(shared),
+				FieldSpec{Key: "ws_backoff", Num: 5, Type: FieldDuration, Default: "60s"})},
+			KindBindCall: {Fields: []FieldSpec{{Key: "method", Num: 6, Type: FieldString}},
+				Target: []FieldSpec{{Key: "url", Num: 7, Type: FieldURL}}},
 		},
 	}
 }
@@ -63,7 +65,7 @@ func TestValidateConnectionSchema(t *testing.T) {
 		t.Fatalf("a bind-call kind's call limit: %v %s", err, slow.CallLimit(KindBindCall))
 	}
 	listening := validConnection()
-	listening.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Type: FieldInt}}, MaxOpen: "2m"}
+	listening.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Num: 9, Type: FieldInt}}, MaxOpen: "2m"}
 	if err := ValidateConnectionSchema(listening); err != nil || listening.OpenLimit(KindBindPersistent) != 2*time.Minute ||
 		validConnection().OpenLimit(KindBindPersistent) != 0 || listening.OpenLimit(KindBindCall) != 0 {
 		t.Fatalf("a bind-persistent kind's open limit: %v %s", err, listening.OpenLimit(KindBindPersistent))
@@ -76,7 +78,7 @@ func TestValidateConnectionSchema(t *testing.T) {
 			s.Kinds[KindBindCall] = k
 		},
 		"max_open must be a duration": func(s *ConnectionSchema) {
-			s.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Type: FieldInt}}, MaxOpen: "soon"}
+			s.Kinds[KindBindPersistent] = ConnectionKind{Fields: []FieldSpec{{Key: "listen_port", Num: 9, Type: FieldInt}}, MaxOpen: "soon"}
 		},
 		"only a bind-call kind says max_call": func(s *ConnectionSchema) {
 			k := s.Kinds[KindReverseCall]
@@ -176,5 +178,47 @@ func TestResolveConnectionValues(t *testing.T) {
 	}
 	if got := ResolveConnectionValues(validConnection(), KindReversePersistent, nil); got["ws_backoff"] != "60s" {
 		t.Errorf("reverse-persistent's default: %v", got)
+	}
+}
+
+// Every field of a connection schema has a number, its target's too, one
+// numbering for the whole schema: a key keeps its number in every kind, and a
+// kind's fields and its target's never share one.
+func TestConnectionSchemaNumbers(t *testing.T) {
+	s := validConnection()
+	if err := ValidateConnectionSchema(s); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range s.SupportedKinds() {
+		if !s.Numbered(kind) {
+			t.Errorf("%s: numbered", kind)
+		}
+	}
+	stale := validConnection() // stored before numbers were required
+	k := stale.Kinds[KindReverseCall]
+	k.Fields = []FieldSpec{{Key: "base_url", Type: FieldURL}}
+	stale.Kinds[KindReverseCall] = k
+	if stale.Numbered(KindReverseCall) || s.Numbered(KindBindPersistent) {
+		t.Error("a kind without numbers, or one the channel does not carry, is not numbered")
+	}
+	cases := map[string]func(*ConnectionSchema){
+		`kinds.reverse-call: field "tls_verify": a num is required`: func(s *ConnectionSchema) { s.Kinds[KindReverseCall].Fields[1].Num = 0 },
+		`kinds.bind-call: field "url": a num is required`:           func(s *ConnectionSchema) { s.Kinds[KindBindCall].Target[0].Num = 0 },
+		`field "base_url": num 8 here, 1 elsewhere`:                 func(s *ConnectionSchema) { s.Kinds[KindReversePersistent].Fields[0].Num = 8 },
+		`field "ws_backoff": num 1 is "base_url"'s`:                 func(s *ConnectionSchema) { s.Kinds[KindReversePersistent].Fields[4].Num = 1 },
+		`field "url": num 6 is "method"'s`:                          func(s *ConnectionSchema) { s.Kinds[KindBindCall].Target[0].Num = 6 },
+		"num must be 1 to 65535":                                    func(s *ConnectionSchema) { s.Kinds[KindBindCall].Fields[0].Num = MaxFieldNumber + 1 },
+	}
+	for want, mutate := range cases {
+		s := validConnection()
+		mutate(&s)
+		if err := ValidateConnectionSchema(s); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q, got %v", want, err)
+		}
+	}
+	// A module's own fields have no numbers.
+	if err := validateFieldSpec(FieldSpec{Key: "log_level", Type: FieldString, Num: 1}); err == nil ||
+		!strings.Contains(err.Error(), "a module's own fields have none") {
+		t.Errorf("a property with a num: %v", err)
 	}
 }

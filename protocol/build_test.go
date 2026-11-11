@@ -14,17 +14,17 @@ const docBuildSchema = `{
   "version": 1,
   "channels": [
     {
-      "module_name": "http", "versions": [2],
+      "module_name": "http", "num": 1, "versions": [2],
       "kinds": [
         {
           "kind": "reverse-call",
           "fields": [
             {
-              "key": "method", "type": "enum", "label": "Method", "default": "POST",
+              "key": "method", "num": 1, "type": "enum", "label": "Method", "default": "POST",
               "options": [{ "value": "GET" }, { "value": "POST" }, { "value": "PUT" }]
             },
             {
-              "key": "path_prefix", "type": "string", "label": "Path prefix", "default": "/",
+              "key": "path_prefix", "num": 2, "type": "string", "label": "Path prefix", "default": "/",
               "description": "Every request path starts with it, e.g. /cdn/assets/ when the front forwards only that path.",
               "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
             }
@@ -34,33 +34,33 @@ const docBuildSchema = `{
           "kind": "reverse-persistent",
           "fields": [
             {
-              "key": "path_prefix", "type": "string", "label": "Path prefix", "default": "/",
+              "key": "path_prefix", "num": 2, "type": "string", "label": "Path prefix", "default": "/",
               "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
             }
           ]
         }
       ]
     },
-    { "module_name": "dns", "versions": [1], "kinds": [{ "kind": "reverse-call" }] }
+    { "module_name": "dns", "num": 2, "versions": [1], "kinds": [{ "kind": "reverse-call" }] }
   ],
   "crypto": "aes-256-cbc-hmac-sha256",
   "fields": [
-    { "key": "kill_date", "type": "datetime", "label": "Kill date", "group": "Limits", "order": 1 },
+    { "key": "kill_date", "num": 1, "type": "datetime", "label": "Kill date", "group": "Limits", "order": 1 },
     {
-      "key": "guardrails", "type": "enum_list", "label": "Run only if", "group": "Limits", "order": 2,
+      "key": "guardrails", "num": 2, "type": "enum_list", "label": "Run only if", "group": "Limits", "order": 2,
       "options": [
         { "value": "domain_joined", "label": "Domain-joined" },
         { "value": "no_debugger", "label": "No debugger attached" }
       ]
     },
-    { "key": "debug", "type": "bool", "label": "Debug build", "default": false, "group": "Build", "order": 3 }
+    { "key": "debug", "num": 3, "type": "bool", "label": "Debug build", "default": false, "group": "Build", "order": 3 }
   ],
   "targets": [
     {
       "id": "windows-exe", "label": "Windows executable", "format": "exe",
       "platforms": ["windows/amd64", "windows/386", "windows/arm64"],
       "fields": [
-        { "key": "icon", "type": "file", "label": "Icon", "accept": [".ico"], "max_size": 262144, "group": "Appearance", "order": 4 }
+        { "key": "icon", "num": 4, "type": "file", "label": "Icon", "accept": [".ico"], "max_size": 262144, "group": "Appearance", "order": 4 }
       ]
     },
     {
@@ -68,7 +68,7 @@ const docBuildSchema = `{
       "platforms": ["windows/amd64"],
       "fields": [
         {
-          "key": "service_name", "type": "string", "label": "Service name", "required": true,
+          "key": "service_name", "num": 5, "type": "string", "label": "Service name", "required": true,
           "pattern": "^[A-Za-z0-9_-]{1,64}$", "group": "Service", "order": 4
         }
       ]
@@ -234,7 +234,25 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`command "exit": op 1 is "sleep"'s`, func(s *BuildSchema) { s.Commands[1].Op = 1 }},
 		{`command "sleep": param "jitter": num must be 1 to 65535`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 0 }},
 		{`command "sleep": param "jitter": num 1 is "interval"'s`, func(s *BuildSchema) { s.Commands[0].Params[1].Num = 1 }},
-		{`field "debug": only a command's params have a num`, func(s *BuildSchema) { s.Fields[2].Num = 1 }},
+		// Numbers for a minion config (minion_config.go).
+		{`field "debug": num must be 1 to 65535`, func(s *BuildSchema) { s.Fields[2].Num = MaxFieldNumber + 1 }},
+		{`field "icon": a num is required`, func(s *BuildSchema) { s.Targets[0].Fields[0].Num = 0 }},
+		{`field "kill_date": a num is required`, func(s *BuildSchema) { s.Fields[0].Num = 0 }},
+		{`channel "http" kind reverse-call: field "method": a num is required`, func(s *BuildSchema) {
+			s.Channels[0].Kinds[0].Fields[0].Num = 0
+		}},
+		{`field "service_name": num 1 is "kill_date"'s`, func(s *BuildSchema) {
+			s.Fields[0].Num, s.Targets[1].Fields[0].Num = 1, 1
+		}},
+		{`channel "http": a num is required`, func(s *BuildSchema) { s.Channels[0].Num = 0 }},
+		{`channel "http": num must be 1 to 65535`, func(s *BuildSchema) { s.Channels[0].Num = -1 }},
+		{`channel "dns": num 1 is "http"'s`, func(s *BuildSchema) { s.Channels[0].Num, s.Channels[1].Num = 1, 1 }},
+		{`channel "http": field "path_prefix": num 3 here, 2 elsewhere`, func(s *BuildSchema) {
+			s.Channels[0].Kinds[0].Fields[1].Num, s.Channels[0].Kinds[1].Fields[0].Num = 2, 3
+		}},
+		{`channel "http": field "path_prefix": num 1 is "method"'s`, func(s *BuildSchema) {
+			s.Channels[0].Kinds[0].Fields[0].Num, s.Channels[0].Kinds[1].Fields[0].Num = 1, 1
+		}},
 		{`command "exit": kinds: "sideways" is not a connection kind`, func(s *BuildSchema) { s.Commands[1].Kinds = []string{"sideways"} }},
 		{`command "exit": kinds: duplicate "reverse-call"`, func(s *BuildSchema) { s.Commands[1].Kinds = []string{KindReverseCall, KindReverseCall} }},
 		{`command "exit": kinds: the factory's minions connect through no bind-persistent connection`, func(s *BuildSchema) {

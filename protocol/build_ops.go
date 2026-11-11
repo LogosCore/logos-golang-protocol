@@ -174,8 +174,13 @@ type BuildRequest struct {
 	// (CompressionDeflate), for a factory that declares
 	// BuildSchema.Compression; "" when the operator turned it off, or the
 	// factory declares none. The factory builds it in.
-	Compression string         `json:"compression,omitempty"`
-	Artifact    ArtifactUpload `json:"artifact"`
+	Compression string `json:"compression,omitempty"`
+	// MinionConfig is the build's minion config (minion_config.go), for a
+	// factory that declares BuildSchema.MinionConfig: this request's settings
+	// as numbered CBOR, base64 in JSON. What of it goes into the minion is the
+	// factory's to decide. Absent for any other factory.
+	MinionConfig []byte         `json:"minion_config,omitempty"`
+	Artifact     ArtifactUpload `json:"artifact"`
 	// Deadline is when core stops waiting for the result.
 	Deadline time.Time `json:"deadline"`
 	Actor    *Actor    `json:"actor,omitempty"`
@@ -468,6 +473,22 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 	}
 	if r.Deadline.IsZero() {
 		add("deadline", "is required")
+	}
+	switch {
+	case s.MinionConfig && len(r.MinionConfig) == 0:
+		add("minion_config", "required: the factory's minions read a minion config")
+	case !s.MinionConfig && len(r.MinionConfig) > 0:
+		add("minion_config", "the factory's minions read no minion config")
+	case s.MinionConfig:
+		c, err := ReadMinionConfig(r.MinionConfig)
+		switch {
+		case err != nil:
+			add("minion_config", "%v", err)
+		case fmt.Sprintf("%x", c.Build) != strings.ReplaceAll(r.BuildID, "-", ""):
+			add("minion_config", "it is another build's")
+		case len(c.Connections) != len(r.Connections):
+			add("minion_config", "%d connections, the request %d", len(c.Connections), len(r.Connections))
+		}
 	}
 	return problems
 }

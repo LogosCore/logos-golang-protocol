@@ -149,9 +149,15 @@ type FieldSpec struct {
 	// against the credential itself (ValidateCredential).
 	Accept  []string `json:"accept,omitempty"`
 	MaxSize int64    `json:"max_size,omitempty"`
-	// Num is a command param's number: how a task names it on the wire
-	// (TaskItem.Args), 1 to MaxCommandNumber, once per command. Only a
-	// build command's params have one (BuildCommand.Params).
+	// Num is the field's number on the wire, so a reader needs no names: a
+	// command param's in a task's args (TaskItem.Args), 1 to
+	// MaxCommandNumber, once per command; a build field's, a factory's
+	// connection parameter's, a connection kind's field's or its target
+	// field's, 1 to MaxFieldNumber, a number for one key where they are read
+	// together (checkFieldNumbers), as a minion config carries them
+	// (MinionConfig). Required on every one of those, files and target
+	// fields too, whether anything reads it by number yet or not. A
+	// manifest's properties and an action's params have none.
 	Num int `json:"num,omitempty"`
 	// When makes a param apply only while another param of its form holds
 	// one of some values (a tunnel's host, only with front forward). A form
@@ -562,7 +568,12 @@ func checkFieldSpec(f FieldSpec, scope fieldScope) error {
 		return fmt.Errorf("key must match %s", keyPattern)
 	}
 	if f.Num != 0 {
-		return fmt.Errorf("only a command's params have a num")
+		switch {
+		case scope == scopeModule:
+			return fmt.Errorf("a num is for a command's params, a build's fields and a connection's: a module's own fields have none")
+		case f.Num < 1 || f.Num > MaxFieldNumber:
+			return fmt.Errorf("num must be 1 to %d", MaxFieldNumber)
+		}
 	}
 	if !fieldTypes[f.Type] {
 		return fmt.Errorf("invalid type %q", f.Type)

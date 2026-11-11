@@ -176,8 +176,8 @@ func TestFieldCredentials(t *testing.T) {
 
 func TestValidateBuildRequest_Credentials(t *testing.T) {
 	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
-	s.Targets[0].Fields = append(s.Targets[0].Fields, FieldSpec{Key: "signing", Type: FieldCredential, Accept: []string{CredentialTypeCertificate}})
-	s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, FieldSpec{Key: "proxy_login", Type: FieldCredentialList})
+	s.Targets[0].Fields = append(s.Targets[0].Fields, FieldSpec{Key: "signing", Num: 6, Type: FieldCredential, Accept: []string{CredentialTypeCertificate}})
+	s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, FieldSpec{Key: "proxy_login", Num: 3, Type: FieldCredentialList})
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatal(err)
 	}

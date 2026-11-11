@@ -99,12 +99,12 @@ func TestExcerpt(t *testing.T) {
 
 func TestTargetValues(t *testing.T) {
 	s := ConnectionSchema{SchemaVersion: ConnectionSchemaV2, Version: 1, Kinds: map[string]ConnectionKind{
-		KindReverseCall: {Fields: []FieldSpec{{Key: "base_url", Type: FieldURL, Label: "Base URL", Required: true}}},
+		KindReverseCall: {Fields: []FieldSpec{{Key: "base_url", Num: 1, Type: FieldURL, Label: "Base URL", Required: true}}},
 		KindBindCall: {
-			Fields: []FieldSpec{{Key: "method", Type: FieldEnum, Label: "Method", Options: []EnumOption{{Value: "POST", Label: "POST"}}, Default: "POST"}},
+			Fields: []FieldSpec{{Key: "method", Num: 2, Type: FieldEnum, Label: "Method", Options: []EnumOption{{Value: "POST", Label: "POST"}}, Default: "POST"}},
 			Target: []FieldSpec{
-				{Key: "url", Type: FieldURL, Label: "URL", Required: true},
-				{Key: "tls_verify", Type: FieldBool, Label: "Verify", Default: false},
+				{Key: "url", Num: 3, Type: FieldURL, Label: "URL", Required: true},
+				{Key: "tls_verify", Num: 4, Type: FieldBool, Label: "Verify", Default: false},
 			},
 		},
 	}}

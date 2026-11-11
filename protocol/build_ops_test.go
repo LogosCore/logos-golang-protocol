@@ -273,7 +273,7 @@ func TestValidateBuildRequest_ShellcodeCannotUseDNS(t *testing.T) {
 
 func TestValidateBuildRequest_ConnectionFile(t *testing.T) {
 	s, r := exampleBuildSchema(t), exampleBuildRequest(t)
-	s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, FieldSpec{Key: "client_cert", Type: FieldFile, Accept: []string{".pem"}})
+	s.Channels[0].Kinds[0].Fields = append(s.Channels[0].Kinds[0].Fields, FieldSpec{Key: "client_cert", Num: 3, Type: FieldFile, Accept: []string{".pem"}})
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatal(err)
 	}

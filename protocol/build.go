@@ -113,6 +113,13 @@ type BuildSchema struct {
 	// minion may pack its own. Optional: without it, core packs nothing
 	// for its minions.
 	Compression []string `json:"compression,omitempty"`
+	// MinionConfig asks core for each build's settings numbered, as a minion
+	// reads them: a minion config (minion_config.go) with each build request
+	// (BuildRequest.MinionConfig), numbered CBOR for the factory to use as it
+	// decides. Every channel, field and connection parameter is numbered, in
+	// every schema (BuildChannel.Num, FieldSpec.Num), so core can make a
+	// config for any build. Optional.
+	MinionConfig bool `json:"minion_config,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection
@@ -130,9 +137,13 @@ type ChannelVersions struct {
 // the factory's order of preference (a build that names none takes the
 // first one the channel carries too).
 type BuildChannel struct {
-	ModuleName string      `json:"module_name"`
-	Versions   []int       `json:"versions"`
-	Kinds      []BuildKind `json:"kinds"`
+	ModuleName string `json:"module_name"`
+	// Num is the channel's number in a minion config
+	// (MinionConnection.Channel), 1 to MaxFieldNumber, once in the schema,
+	// required: a minion reading a config needs no channel names.
+	Num      int         `json:"num,omitempty"`
+	Versions []int       `json:"versions"`
+	Kinds    []BuildKind `json:"kinds"`
 }
 
 // BuildKind is a connection kind a factory's minions support through a
@@ -429,6 +440,7 @@ func ValidateBuildSchema(s BuildSchema) error {
 		return fmt.Errorf("too many channels (%d > %d)", len(s.Channels), MaxBuildChannels)
 	}
 	channels := make(map[string]ChannelVersions, len(s.Channels))
+	channelNums := map[int]string{}
 	for _, c := range s.Channels {
 		cv := ChannelVersions{ModuleName: c.ModuleName, Versions: c.Versions, Kinds: c.KindNames()}
 		if err := validateChannelVersions(cv); err != nil {
@@ -441,6 +453,18 @@ func ValidateBuildSchema(s BuildSchema) error {
 			return fmt.Errorf("duplicate channel %q", c.ModuleName)
 		}
 		channels[c.ModuleName] = cv
+		switch {
+		case c.Num == 0:
+			return fmt.Errorf("channel %q: a num is required (its number in a minion config)", c.ModuleName)
+		case c.Num < 0 || c.Num > MaxFieldNumber:
+			return fmt.Errorf("channel %q: num must be 1 to %d", c.ModuleName, MaxFieldNumber)
+		case c.Num != 0:
+			if other, dup := channelNums[c.Num]; dup {
+				return fmt.Errorf("channel %q: num %d is %q's", c.ModuleName, c.Num, other)
+			}
+			channelNums[c.Num] = c.ModuleName
+		}
+		kindFields := make([][]FieldSpec, 0, len(c.Kinds))
 		for _, k := range c.Kinds {
 			if len(k.Fields) > MaxConnectionParams {
 				return fmt.Errorf("channel %q kind %s: too many connection parameters (%d > %d)", c.ModuleName, k.Kind,
@@ -449,6 +473,10 @@ func ValidateBuildSchema(s BuildSchema) error {
 			if _, err := validateBuildFields(k.Fields, nil); err != nil {
 				return fmt.Errorf("channel %q kind %s: %w", c.ModuleName, k.Kind, err)
 			}
+			kindFields = append(kindFields, k.Fields)
+		}
+		if err := checkFieldNumbers(kindFields...); err != nil {
+			return fmt.Errorf("channel %q: %w", c.ModuleName, err)
 		}
 	}
 
@@ -476,6 +504,7 @@ func ValidateBuildSchema(s BuildSchema) error {
 		return fmt.Errorf("too many targets (%d > %d)", len(s.Targets), MaxBuildTargets)
 	}
 	ids := make(map[string]bool, len(s.Targets))
+	fieldGroups := [][]FieldSpec{s.Fields}
 	for _, t := range s.Targets {
 		if err := validateBuildTarget(t, shared, channels); err != nil {
 			return fmt.Errorf("target %q: %w", t.ID, err)
@@ -484,6 +513,10 @@ func ValidateBuildSchema(s BuildSchema) error {
 			return fmt.Errorf("duplicate target %q", t.ID)
 		}
 		ids[t.ID] = true
+		fieldGroups = append(fieldGroups, t.Fields)
+	}
+	if err := checkFieldNumbers(fieldGroups...); err != nil {
+		return err
 	}
 
 	if err := validateCodecs(s); err != nil {
@@ -689,6 +722,30 @@ func validateChannelVersions(c ChannelVersions) error {
 	return nil
 }
 
+// checkFieldNumbers checks the numbers of fields read together (a schema's
+// shared fields and its targets' own, a channel's kinds' fields): a number
+// names one key, and a key numbered in two places has the same number in
+// both. Each number's range is checkFieldSpec's.
+func checkFieldNumbers(groups ...[]FieldSpec) error {
+	keys := map[int]string{}
+	nums := map[string]int{}
+	for _, g := range groups {
+		for _, f := range g {
+			if f.Num == 0 {
+				continue
+			}
+			if k, ok := keys[f.Num]; ok && k != f.Key {
+				return fmt.Errorf("field %q: num %d is %q's", f.Key, f.Num, k)
+			}
+			if n, ok := nums[f.Key]; ok && n != f.Num {
+				return fmt.Errorf("field %q: num %d here, %d elsewhere", f.Key, f.Num, n)
+			}
+			keys[f.Num], nums[f.Key] = f.Key, f.Num
+		}
+	}
+	return nil
+}
+
 // validateBuildFields checks fields, and that their keys are unique, also
 // against taken. It returns taken plus the new keys.
 func validateBuildFields(fields []FieldSpec, taken map[string]bool) (map[string]bool, error) {
@@ -702,6 +759,9 @@ func validateBuildFields(fields []FieldSpec, taken map[string]bool) (map[string]
 		}
 		if err := notParam(f); err != nil {
 			return nil, fmt.Errorf("field %q: %w", f.Key, err)
+		}
+		if f.Num == 0 {
+			return nil, fmt.Errorf("field %q: a num is required (its number in a minion config)", f.Key)
 		}
 		if keys[f.Key] {
 			return nil, fmt.Errorf("duplicate field key %q", f.Key)
