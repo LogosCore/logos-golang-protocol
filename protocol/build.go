@@ -46,6 +46,10 @@ const (
 	MaxCommandParams        = 32 // per command
 )
 
+// MaxErrorCode is the highest of a factory's error codes (ErrorCode): an
+// exit code every OS keeps whole, a Unix process's being a byte.
+const MaxErrorCode = 255
+
 var (
 	// targetIDPattern is also what a target's format must match.
 	targetIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -91,6 +95,11 @@ type BuildSchema struct {
 	// from those of its target, and the minion has only those. Optional: a
 	// factory without commands builds minions with none.
 	Commands []BuildCommand `json:"commands,omitempty"`
+	// ErrorCodes are the factory's own: what a minion's exit code means when
+	// it stops on an error (a config it cannot read, no connection it can
+	// use), for an operator to look up. Optional; core shows them with the
+	// factory and its builds, and does nothing else with them.
+	ErrorCodes []ErrorCode `json:"error_codes,omitempty"`
 	// PersistedSessions says the minions can claim a persisted session:
 	// built with a BuildRequest.SessionID, they claim it in their hello
 	// (HelloItem.SID). Optional.
@@ -120,6 +129,19 @@ type BuildSchema struct {
 	// every schema (BuildChannel.Num, FieldSpec.Num), so core can make a
 	// config for any build. Optional.
 	MinionConfig bool `json:"minion_config,omitempty"`
+}
+
+// ErrorCode is one of a factory's error codes (BuildSchema.ErrorCodes).
+type ErrorCode struct {
+	// Code is the number, 1 to MaxErrorCode, once in the schema: a minion's
+	// exit code. 0 is success. A runtime's own may be declared too, to say
+	// what they mean for the factory's minions: Go exits with 2 on a panic,
+	// and shells report a process a signal killed as 128 and its number.
+	Code int `json:"code"`
+	// Label says what it means, in a few words. Required.
+	Label string `json:"label"`
+	// Description says more: when it happens, what to do. Optional.
+	Description string `json:"description,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection
@@ -554,6 +576,28 @@ func ValidateBuildSchema(s BuildSchema) error {
 			return fmt.Errorf("command %q: op %d is %q's", c.ID, c.Op, other)
 		}
 		ops[c.Op] = c.ID
+	}
+	return validateErrorCodes(s.ErrorCodes)
+}
+
+// validateErrorCodes checks a schema's error codes: each 1 to MaxErrorCode,
+// once, with a label.
+func validateErrorCodes(codes []ErrorCode) error {
+	seen := make(map[int]bool, len(codes))
+	for _, c := range codes {
+		if c.Code < 1 || c.Code > MaxErrorCode {
+			return fmt.Errorf("error code %d: must be 1 to %d (0 is success)", c.Code, MaxErrorCode)
+		}
+		if seen[c.Code] {
+			return fmt.Errorf("error code %d: declared twice", c.Code)
+		}
+		seen[c.Code] = true
+		if strings.TrimSpace(c.Label) == "" {
+			return fmt.Errorf("error code %d: a label is required", c.Code)
+		}
+		if err := validateText(c.Label, c.Description); err != nil {
+			return fmt.Errorf("error code %d: %w", c.Code, err)
+		}
 	}
 	return nil
 }

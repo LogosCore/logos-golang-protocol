@@ -99,6 +99,10 @@ const docBuildSchema = `{
       "params": [{ "key": "path", "num": 1, "type": "string", "label": "Path", "required": true }]
     },
     { "id": "screenshot", "op": 5, "label": "Screenshot", "targets": ["windows-exe"] }
+  ],
+  "error_codes": [
+    { "code": 3, "label": "Its config does not read", "description": "The settings built into the minion are damaged: build it again." },
+    { "code": 4, "label": "Past its kill date" }
   ]
 }`
 
@@ -129,6 +133,12 @@ func TestBuildSchemaDocExample(t *testing.T) {
 	if http, ok := s.Channel("http"); !ok || len(http.KindFields(KindReverseCall)) != 2 || len(http.KindFields(KindReversePersistent)) != 1 ||
 		!reflect.DeepEqual(http.Versions, []int{2}) {
 		t.Fatalf("http channel not decoded: %+v", http)
+	}
+	if want := []ErrorCode{
+		{Code: 3, Label: "Its config does not read", Description: "The settings built into the minion are damaged: build it again."},
+		{Code: 4, Label: "Past its kill date"},
+	}; !reflect.DeepEqual(s.ErrorCodes, want) {
+		t.Fatalf("error codes not decoded: %+v", s.ErrorCodes)
 	}
 
 	raw, err := json.Marshal(s)
@@ -324,6 +334,16 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`command "shell": param "command": a file field has no default`, func(s *BuildSchema) {
 			s.Commands[2].Params[0].Type, s.Commands[2].Params[0].Default = FieldFile, "abc"
 		}},
+		// Error codes: exit codes, a byte on Unix, 0 being success.
+		{`error code 0: must be 1 to 255 (0 is success)`, func(s *BuildSchema) { s.ErrorCodes[0].Code = 0 }},
+		{`error code 256: must be 1 to 255`, func(s *BuildSchema) { s.ErrorCodes[1].Code = 256 }},
+		{`error code -1: must be 1 to 255`, func(s *BuildSchema) { s.ErrorCodes[0].Code = -1 }},
+		{`error code 3: declared twice`, func(s *BuildSchema) { s.ErrorCodes[1].Code = 3 }},
+		{`error code 4: a label is required`, func(s *BuildSchema) { s.ErrorCodes[1].Label = " " }},
+		{`error code 4: label longer than 120`, func(s *BuildSchema) { s.ErrorCodes[1].Label = strings.Repeat("x", 121) }},
+		{`error code 3: description longer than 1000`, func(s *BuildSchema) {
+			s.ErrorCodes[0].Description = strings.Repeat("x", 1001)
+		}},
 	}
 	for _, c := range cases {
 		s := exampleBuildSchema(t)
@@ -495,5 +515,28 @@ func TestValidateFieldValues(t *testing.T) {
 	want := map[string]any{"name": "x", "mode": "fast", "debug": false}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ResolveFieldValues = %v, want %v", got, want)
+	}
+}
+
+// Error codes are optional, and each of 1 to 255 may be declared, the
+// runtime's own among them (Go's 2 for a panic, a shell's 137).
+func TestBuildSchemaErrorCodes(t *testing.T) {
+	s := exampleBuildSchema(t)
+	s.ErrorCodes = nil
+	if err := ValidateBuildSchema(s); err != nil {
+		t.Fatalf("no error codes: %v", err)
+	}
+	for _, code := range []int{1, 2, 137, MaxErrorCode} {
+		s.ErrorCodes = []ErrorCode{{Code: code, Label: "x"}}
+		if err := ValidateBuildSchema(s); err != nil {
+			t.Errorf("code %d: %v", code, err)
+		}
+	}
+	raw, err := json.Marshal(BuildSchema{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "error_codes") {
+		t.Errorf("none declared, yet the JSON names them: %s", raw)
 	}
 }
