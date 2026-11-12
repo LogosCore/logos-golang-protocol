@@ -97,9 +97,18 @@ type BuildSchema struct {
 	Commands []BuildCommand `json:"commands,omitempty"`
 	// ErrorCodes are the factory's own: what a minion's exit code means when
 	// it stops on an error (a config it cannot read, no connection it can
-	// use), for an operator to look up. Optional; core shows them with the
-	// factory and its builds, and does nothing else with them.
+	// use), for an operator to look up (error_codes.go). Optional; core
+	// shows them with the factory and its builds, and does nothing else with
+	// them.
 	ErrorCodes []ErrorCode `json:"error_codes,omitempty"`
+	// ErrorCodesPerBuild says the minions exit with the codes each build
+	// gives them (BuildRequest.ErrorCodes): core draws one for every
+	// declared code that is not Fixed (DrawErrorCodes) unless the operator
+	// turns that off, so two builds exit with different codes for the same
+	// error. Needs a code that is not fixed. A factory that starts
+	// declaring it raises Version: an instance that would ignore the codes
+	// is never offered a build that carries them. Optional.
+	ErrorCodesPerBuild bool `json:"error_codes_per_build,omitempty"`
 	// PersistedSessions says the minions can claim a persisted session:
 	// built with a BuildRequest.SessionID, they claim it in their hello
 	// (HelloItem.SID). Optional.
@@ -142,6 +151,11 @@ type ErrorCode struct {
 	Label string `json:"label"`
 	// Description says more: when it happens, what to do. Optional.
 	Description string `json:"description,omitempty"`
+	// Fixed says the code is the same in every build, for a schema that
+	// declares ErrorCodesPerBuild: core draws none for it, and draws it for
+	// no other code. A runtime's own (Go's 2), or one the minions cannot
+	// change.
+	Fixed bool `json:"fixed,omitempty"`
 }
 
 // ChannelVersions is a channel kind (its module_name), the connection
@@ -577,29 +591,7 @@ func ValidateBuildSchema(s BuildSchema) error {
 		}
 		ops[c.Op] = c.ID
 	}
-	return validateErrorCodes(s.ErrorCodes)
-}
-
-// validateErrorCodes checks a schema's error codes: each 1 to MaxErrorCode,
-// once, with a label.
-func validateErrorCodes(codes []ErrorCode) error {
-	seen := make(map[int]bool, len(codes))
-	for _, c := range codes {
-		if c.Code < 1 || c.Code > MaxErrorCode {
-			return fmt.Errorf("error code %d: must be 1 to %d (0 is success)", c.Code, MaxErrorCode)
-		}
-		if seen[c.Code] {
-			return fmt.Errorf("error code %d: declared twice", c.Code)
-		}
-		seen[c.Code] = true
-		if strings.TrimSpace(c.Label) == "" {
-			return fmt.Errorf("error code %d: a label is required", c.Code)
-		}
-		if err := validateText(c.Label, c.Description); err != nil {
-			return fmt.Errorf("error code %d: %w", c.Code, err)
-		}
-	}
-	return nil
+	return validateErrorCodes(s)
 }
 
 // CommandHelp is core's own command, in every session's console: it lists

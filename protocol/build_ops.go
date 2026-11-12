@@ -175,6 +175,12 @@ type BuildRequest struct {
 	// BuildSchema.Compression; "" when the operator turned it off, or the
 	// factory declares none. The factory builds it in.
 	Compression string `json:"compression,omitempty"`
+	// ErrorCodes are the build's exit codes (error_codes.go), for a factory
+	// that declares BuildSchema.ErrorCodesPerBuild: one for every declared
+	// code that is not fixed, which the factory builds into the minion.
+	// Absent when the operator turned them off, and for any other factory:
+	// the minion exits with the declared codes. ExitCode reads one.
+	ErrorCodes []BuildErrorCode `json:"error_codes,omitempty"`
 	// MinionConfig is the build's minion config (minion_config.go), for a
 	// factory that declares BuildSchema.MinionConfig: this request's settings
 	// as numbered CBOR, base64 in JSON. What of it goes into the minion is the
@@ -356,6 +362,9 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		case *r.MaxTasks > MaxTasksLimit:
 			add("max_tasks", "%d at most", MaxTasksLimit)
 		}
+	}
+	if p := validateRequestErrorCodes(s, r.ErrorCodes); p != "" {
+		add("error_codes", "%s", p)
 	}
 	if r.SessionID != "" {
 		switch {

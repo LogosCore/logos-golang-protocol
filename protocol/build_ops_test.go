@@ -44,6 +44,7 @@ const (
     }
   },
   "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "…": "…" } },
+  "error_codes": [{ "code": 3, "exit_code": 87 }, { "code": 4, "exit_code": 201 }],
   "artifact": { "upload_url": "/api/factory/builds/5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f/artifact?expires=1793025060&sig=…", "max_size": 268435456 },
   "deadline": "2026-10-26T14:30:00Z",
   "actor": { "type": "user", "id": "f140266c-…", "name": "admin" }
@@ -105,6 +106,9 @@ func TestBuildRequestDocExample(t *testing.T) {
 	}
 	if want := time.Date(2026, 10, 26, 14, 30, 0, 0, time.UTC); !r.Deadline.Equal(want) {
 		t.Fatalf("deadline = %v, want %v", r.Deadline, want)
+	}
+	if r.ExitCode(3) != 87 || r.ExitCode(4) != 201 || r.ExitCode(2) != 2 {
+		t.Fatalf("error codes not decoded: %+v", r.ErrorCodes)
 	}
 
 	raw, err := json.Marshal(r)

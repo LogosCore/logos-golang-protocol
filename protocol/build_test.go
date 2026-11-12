@@ -100,9 +100,11 @@ const docBuildSchema = `{
     },
     { "id": "screenshot", "op": 5, "label": "Screenshot", "targets": ["windows-exe"] }
   ],
+  "error_codes_per_build": true,
   "error_codes": [
     { "code": 3, "label": "Its config does not read", "description": "The settings built into the minion are damaged: build it again." },
-    { "code": 4, "label": "Past its kill date" }
+    { "code": 4, "label": "Past its kill date" },
+    { "code": 2, "label": "Crashed", "description": "Go's own code for a panic: the minion's output says where.", "fixed": true }
   ]
 }`
 
@@ -137,8 +139,9 @@ func TestBuildSchemaDocExample(t *testing.T) {
 	if want := []ErrorCode{
 		{Code: 3, Label: "Its config does not read", Description: "The settings built into the minion are damaged: build it again."},
 		{Code: 4, Label: "Past its kill date"},
-	}; !reflect.DeepEqual(s.ErrorCodes, want) {
-		t.Fatalf("error codes not decoded: %+v", s.ErrorCodes)
+		{Code: 2, Label: "Crashed", Description: "Go's own code for a panic: the minion's output says where.", Fixed: true},
+	}; !reflect.DeepEqual(s.ErrorCodes, want) || !s.ErrorCodesPerBuild {
+		t.Fatalf("error codes not decoded: %+v (per build %v)", s.ErrorCodes, s.ErrorCodesPerBuild)
 	}
 
 	raw, err := json.Marshal(s)
@@ -522,7 +525,7 @@ func TestValidateFieldValues(t *testing.T) {
 // runtime's own among them (Go's 2 for a panic, a shell's 137).
 func TestBuildSchemaErrorCodes(t *testing.T) {
 	s := exampleBuildSchema(t)
-	s.ErrorCodes = nil
+	s.ErrorCodes, s.ErrorCodesPerBuild = nil, false
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatalf("no error codes: %v", err)
 	}
