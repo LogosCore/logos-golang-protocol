@@ -23,7 +23,9 @@ const (
 
 // InboundMinionMessage is one minion message a channel relays to core.
 type InboundMinionMessage struct {
-	// MessageID is unique per request, a UUIDv4 (NewID). Core dedups on it.
+	// MessageID is unique per request, a UUIDv4 (NewID). Core checks its
+	// form only: it knows a message sent again by the minion's own message
+	// id, sealed in Data, never by this one.
 	MessageID string
 	// BuildID is the id of the build that made the minion.
 	BuildID string

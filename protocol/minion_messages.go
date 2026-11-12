@@ -806,8 +806,9 @@ func NewMessageID() []byte {
 // ValidateBuildMessage checks a minion's message under its build id, which
 // it sends before it has a session: one stage, or one hello, alone. Core
 // takes nothing else there; the rest goes under the session id the
-// hello_response gives (a minion answering a rehello under the build id
-// says its hello alone too).
+// hello_response gives. A bind-call page's answer to core's own rehello is
+// not checked here: core takes its hello, then the rest of that answer
+// under the session the hello opens.
 func ValidateBuildMessage(items []cbor.RawMessage) error {
 	if len(items) == 1 && (ItemType(items[0]) == ItemStage || ItemType(items[0]) == ItemHello) {
 		return nil
