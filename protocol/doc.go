@@ -17,7 +17,7 @@
 //     the management manifest and its RPC payloads (management.go), live log
 //     streaming (logs.go), a channel's minion connection schema
 //     (connection.go), and a factory's build schema (build.go) with the build
-//     operations (build_ops.go). They share one field description, FieldSpec,
+//     operations (build_ops.go) and the live build log (build_log.go). They share one field description, FieldSpec,
 //     and one validator for its values.
 //   - a build's codec (codecs.go): core's envelopes, CBOR and JSON
 //     (json_envelope.go), and the factory link over which a factory

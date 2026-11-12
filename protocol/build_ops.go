@@ -18,8 +18,9 @@ import (
 // at once, with its plan for the build: the steps it will go through. While
 // it works it reports the step it is on to core on logos.core.rpc; when it is
 // done it uploads the artifact to core (ArtifactUpload) and sends
-// factory.build.result. Core can stop a build with factory.build.cancel. All
-// four operations are request/reply.
+// factory.build.result. It may send its output as it goes, by step
+// (factory.build.log, build_log.go). Core can stop a build with
+// factory.build.cancel. All five operations are request/reply.
 
 // Build operation types.
 const (
@@ -317,7 +318,8 @@ type BuildResult struct {
 	Status   BuildStatus    `json:"status"`
 	Artifact *BuildArtifact `json:"artifact,omitempty"`
 	Warnings []string       `json:"warnings,omitempty"`
-	// Log is the build output: its last MaxBuildLogBytes.
+	// Log is the build output: its last MaxBuildLogBytes. Core keeps it
+	// when it got no live log for the build (build_log.go).
 	Log   string      `json:"log,omitempty"`
 	Error *BuildError `json:"error,omitempty"`
 }
