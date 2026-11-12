@@ -169,6 +169,35 @@ type FieldSpec struct {
 	// shows it under More options, folded. Only a command's or an action's
 	// params are.
 	Advanced bool `json:"advanced,omitempty"`
+	// Platforms makes a build field apply only to builds for these
+	// platforms, "os/arch" as a target's (BuildTarget.Platforms), where
+	// "any" stands for either half (any/arm: every 32-bit ARM). Empty: every
+	// platform. A form shows it only then; a value given for another
+	// platform is refused, and its default is not filled in. Only a build's
+	// fields have them, the shared ones and a target's, and each one names a
+	// platform the field's targets build for (BuildSchema.PlatformFields).
+	Platforms []string `json:"platforms,omitempty"`
+}
+
+// OnPlatform reports whether build field f applies to a build for
+// platform: always without Platforms, else when one of them matches it,
+// half by half, "any" matching either.
+func (f FieldSpec) OnPlatform(platform string) bool {
+	if len(f.Platforms) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(f.Platforms, func(p string) bool { return platformMatches(p, platform) })
+}
+
+// platformMatches reports whether pattern ("os/arch", either half "any")
+// matches platform.
+func platformMatches(pattern, platform string) bool {
+	pos, parch, ok := strings.Cut(pattern, "/")
+	if !ok {
+		return false
+	}
+	goos, goarch, ok := strings.Cut(platform, "/")
+	return ok && (pos == "any" || pos == goos) && (parch == "any" || parch == goarch)
 }
 
 // FieldCondition is when a param applies (FieldSpec.When): while the param
@@ -566,6 +595,11 @@ func FieldApplies(f FieldSpec, fields []FieldSpec, values map[string]any) bool {
 func checkFieldSpec(f FieldSpec, scope fieldScope) error {
 	if !keyPattern.MatchString(f.Key) {
 		return fmt.Errorf("key must match %s", keyPattern)
+	}
+	if len(f.Platforms) > 0 {
+		// validateBuildFields checks a build field's, and passes it on
+		// without them.
+		return fmt.Errorf("platforms are only for a build's fields")
 	}
 	if f.Num != 0 {
 		switch {

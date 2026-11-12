@@ -366,6 +366,35 @@ func (s BuildSchema) TargetFields(t BuildTarget) []FieldSpec {
 	return append(append(out, s.Fields...), t.Fields...)
 }
 
+// PlatformFields returns the fields a build of t for platform takes: its
+// TargetFields that apply there (FieldSpec.OnPlatform).
+func (s BuildSchema) PlatformFields(t BuildTarget, platform string) []FieldSpec {
+	out := []FieldSpec{}
+	for _, f := range s.TargetFields(t) {
+		if f.OnPlatform(platform) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// OffPlatformValues are the problems, by key, of values given for fields of
+// t that do not apply to a build for platform (PlatformFields leaves them
+// out, so a check against those calls them undeclared): "only for
+// linux/arm".
+func (s BuildSchema) OffPlatformValues(t BuildTarget, platform string, values map[string]any) map[string]string {
+	var out map[string]string
+	for _, f := range s.TargetFields(t) {
+		if v, ok := values[f.Key]; ok && v != nil && !f.OnPlatform(platform) {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[f.Key] = "only for " + strings.Join(f.Platforms, ", ")
+		}
+	}
+	return out
+}
+
 // TargetChannels returns the channel kinds and versions a build of t can
 // connect through.
 func (s BuildSchema) TargetChannels(t BuildTarget) []ChannelVersions {
@@ -506,7 +535,7 @@ func ValidateBuildSchema(s BuildSchema) error {
 				return fmt.Errorf("channel %q kind %s: too many connection parameters (%d > %d)", c.ModuleName, k.Kind,
 					len(k.Fields), MaxConnectionParams)
 			}
-			if _, err := validateBuildFields(k.Fields, nil); err != nil {
+			if _, err := validateBuildFields(k.Fields, nil, nil); err != nil {
 				return fmt.Errorf("channel %q kind %s: %w", c.ModuleName, k.Kind, err)
 			}
 			kindFields = append(kindFields, k.Fields)
@@ -528,7 +557,12 @@ func ValidateBuildSchema(s BuildSchema) error {
 	if len(s.Fields) > MaxBuildTargetFields {
 		return fmt.Errorf("too many fields (%d > %d)", len(s.Fields), MaxBuildTargetFields)
 	}
-	shared, err := validateBuildFields(s.Fields, nil)
+	// A shared field's platforms are any target's.
+	var platforms []string
+	for _, t := range s.Targets {
+		platforms = append(platforms, t.Platforms...)
+	}
+	shared, err := validateBuildFields(s.Fields, nil, platforms)
 	if err != nil {
 		return err
 	}
@@ -783,13 +817,21 @@ func checkFieldNumbers(groups ...[]FieldSpec) error {
 }
 
 // validateBuildFields checks fields, and that their keys are unique, also
-// against taken. It returns taken plus the new keys.
-func validateBuildFields(fields []FieldSpec, taken map[string]bool) (map[string]bool, error) {
+// against taken. It returns taken plus the new keys. platforms are what the
+// fields' builds can be for: a field's Platforms must each match one; nil
+// where fields have none (a connection kind's).
+func validateBuildFields(fields []FieldSpec, taken map[string]bool, platforms []string) (map[string]bool, error) {
 	keys := make(map[string]bool, len(taken)+len(fields))
 	for k := range taken {
 		keys[k] = true
 	}
 	for _, f := range fields {
+		if platforms != nil && len(f.Platforms) > 0 {
+			if err := checkFieldPlatforms(f.Platforms, platforms); err != nil {
+				return nil, fmt.Errorf("field %q: %w", f.Key, err)
+			}
+			f.Platforms = nil
+		}
 		if err := validateBuildFieldSpec(f); err != nil {
 			return nil, fmt.Errorf("field %q: %w", f.Key, err)
 		}
@@ -805,6 +847,27 @@ func validateBuildFields(fields []FieldSpec, taken map[string]bool) (map[string]
 		keys[f.Key] = true
 	}
 	return keys, nil
+}
+
+// checkFieldPlatforms checks a build field's Platforms against the
+// platforms its builds can be for: each "os/arch" (either half "any"), once,
+// matching one of them, so the field applies to some build.
+func checkFieldPlatforms(field, platforms []string) error {
+	if len(field) > MaxBuildPlatforms {
+		return fmt.Errorf("too many platforms (%d > %d)", len(field), MaxBuildPlatforms)
+	}
+	for i, p := range field {
+		if !platformPattern.MatchString(p) {
+			return fmt.Errorf("platform %q must be os/arch, e.g. linux/arm or any/arm", p)
+		}
+		if slices.Contains(field[:i], p) {
+			return fmt.Errorf("duplicate platform %q", p)
+		}
+		if !slices.ContainsFunc(platforms, func(b string) bool { return platformMatches(p, b) }) {
+			return fmt.Errorf("platform %q matches none its builds can be for (%s)", p, strings.Join(platforms, ", "))
+		}
+	}
+	return nil
 }
 
 func validateBuildTarget(t BuildTarget, shared map[string]bool, channels map[string]ChannelVersions) error {
@@ -831,7 +894,7 @@ func validateBuildTarget(t BuildTarget, shared map[string]bool, channels map[str
 	if len(shared)+len(t.Fields) > MaxBuildTargetFields {
 		return fmt.Errorf("too many fields (%d with the shared ones > %d)", len(shared)+len(t.Fields), MaxBuildTargetFields)
 	}
-	if _, err := validateBuildFields(t.Fields, shared); err != nil {
+	if _, err := validateBuildFields(t.Fields, shared, t.Platforms); err != nil {
 		return err
 	}
 	for i, c := range t.Channels {

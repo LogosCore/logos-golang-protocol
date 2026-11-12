@@ -73,7 +73,15 @@ const docBuildSchema = `{
         }
       ]
     },
-    { "id": "linux-elf", "label": "Linux binary", "format": "elf", "platforms": ["linux/amd64", "linux/arm64"] },
+    {
+      "id": "linux-elf", "label": "Linux binary", "format": "elf", "platforms": ["linux/amd64", "linux/arm64", "linux/arm"],
+      "fields": [
+        {
+          "key": "goarm", "num": 8, "type": "enum", "label": "ARM version", "default": "7", "platforms": ["linux/arm"],
+          "options": [{ "value": "7", "label": "ARMv7" }, { "value": "6", "label": "ARMv6" }, { "value": "5", "label": "ARMv5" }]
+        }
+      ]
+    },
     {
       "id": "shellcode", "label": "Shellcode", "format": "bin",
       "platforms": ["windows/amd64", "linux/amd64"],

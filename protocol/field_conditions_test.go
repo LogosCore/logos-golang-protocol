@@ -117,7 +117,7 @@ func TestParamConditionsChecked(t *testing.T) {
 	if err := ValidateManifest(prop); err == nil || !strings.Contains(err.Error(), onlyParams) {
 		t.Errorf("a property's condition: %v", err)
 	}
-	if _, err := validateBuildFields([]FieldSpec{{Key: "port", Type: FieldInt, Advanced: true}}, nil); err == nil ||
+	if _, err := validateBuildFields([]FieldSpec{{Key: "port", Type: FieldInt, Advanced: true}}, nil, nil); err == nil ||
 		!strings.Contains(err.Error(), onlyParams) {
 		t.Errorf("an advanced build field: %v", err)
 	}

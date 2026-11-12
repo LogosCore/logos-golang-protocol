@@ -254,7 +254,7 @@ func NewMinionConfig(s BuildSchema, r BuildRequest, channel ConnectionSchemaAt) 
 			return c, fmt.Errorf("session_id: %w", err)
 		}
 	}
-	if c.Values, err = numberedValues(s.TargetFields(t), r.Values, r.Credentials, false); err != nil {
+	if c.Values, err = numberedValues(s.PlatformFields(t, r.Platform), r.Values, r.Credentials, false); err != nil {
 		return c, fmt.Errorf("values.%w", err)
 	}
 	return c, nil

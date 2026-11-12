@@ -416,7 +416,10 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		if !t.HasPlatform(r.Platform) {
 			add("platform", "not a platform of target %q", t.ID)
 		}
-		checkValues("values.", s.TargetFields(t), r.Values)
+		checkValues("values.", s.PlatformFields(t, r.Platform), r.Values)
+		for k, reason := range s.OffPlatformValues(t, r.Platform, r.Values) {
+			add("values."+k, "%s", reason)
+		}
 		for key, reason := range checkCommands(s, t, r.Commands) {
 			add(key, "%s", reason)
 		}
