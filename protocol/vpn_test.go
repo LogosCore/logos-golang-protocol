@@ -65,7 +65,7 @@ func TestTunnelVPNParams(t *testing.T) {
 		t.Errorf("a vpn: %v %v", args, problems)
 	}
 	if _, problems = TaskArgs(params, map[string]any{ParamFront: FrontVPN, ParamRoutes: []any{"10.0.0.0/24"}, ParamPort: 41000}); problems[ParamPort] !=
-		"only when front is socks, http, forward or terminal" {
+		"only when front is socks, http, forward, terminal, rdp, vnc, ssh or telnet" {
 		t.Errorf("a vpn's port: %v", problems)
 	}
 	if _, problems = TaskArgs(params, map[string]any{ParamRoutes: []any{"10.0.0.0/24"}}); problems[ParamRoutes] != "only when front is vpn" {

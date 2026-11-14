@@ -190,7 +190,25 @@ const (
 	// ParamRoutes are a VPN's networks (FrontVPN): CIDRs the client routes
 	// on the operator's machine (TunnelRoutes). Core changes them live.
 	ParamRoutes = "routes"
+	// ParamCredential is a desktop's login (DesktopFronts): one of the
+	// operation's credentials, a password (PLAINTEXT) or, for SSH, a key
+	// (KEY), which core gives guacd each time a desktop opens; none: the
+	// desktop asks for what its server needs.
+	ParamCredential = "credential"
+	// ParamSecurity and ParamIgnoreCert are an RDP desktop's: the security
+	// it negotiates (RDPSecurity), and whether a server certificate guacd
+	// cannot check is taken.
+	ParamSecurity   = "security"
+	ParamIgnoreCert = "ignore_cert"
 )
+
+// RDPSecurity are an RDP desktop's security modes (ParamSecurity), as
+// guacd names them, the default first: any the server takes, network level
+// authentication, its extended form, TLS, Hyper-V's console (vmconnect), or
+// RDP's own encryption.
+func RDPSecurity() []string {
+	return []string{"any", "nla", "nla-ext", "tls", "vmconnect", "rdp"}
+}
 
 // Tunnel fronts: what core puts in front of a tunnel task's streams, the
 // operator's to pick as the task starts (ParamFront).
@@ -213,7 +231,45 @@ const (
 	// each connection, UDP flow and ping it sees there a stream, over core's
 	// own address (the VPN link, VPNPath): no operational port.
 	FrontVPN = "vpn"
+	// FrontRDP, FrontVNC, FrontSSH and FrontTelnet: desktops
+	// (DesktopFronts). A forward to a server of the protocol's (host:to, its
+	// port when the task names none: DesktopPort), on one of core's
+	// operational ports for an operator's own client (mstsc, a VNC viewer,
+	// ssh), and in the web app: core's guacd (Apache Guacamole) speaks the
+	// protocol to the server through the port, logging in with the task's
+	// credential, and the web app draws it.
+	FrontRDP    = "rdp"
+	FrontVNC    = "vnc"
+	FrontSSH    = "ssh"
+	FrontTelnet = "telnet"
 )
+
+// DesktopFronts are the fronts a desktop is drawn for in the web app.
+func DesktopFronts() []string {
+	return []string{FrontRDP, FrontVNC, FrontSSH, FrontTelnet}
+}
+
+// IsDesktopFront reports whether front is a desktop's (DesktopFronts).
+func IsDesktopFront(front string) bool {
+	return slices.Contains(DesktopFronts(), front)
+}
+
+// DesktopPort is where a desktop front's server listens when its task
+// names no port: 3389 (RDP), 5900 (VNC), 22 (SSH), 23 (Telnet); 0 for any
+// other front.
+func DesktopPort(front string) int {
+	switch front {
+	case FrontRDP:
+		return 3389
+	case FrontVNC:
+		return 5900
+	case FrontSSH:
+		return 22
+	case FrontTelnet:
+		return 23
+	}
+	return 0
+}
 
 // TunnelFronts are the fronts a tunnel action takes, the one a task that
 // names none gets first (a reverse tunnel's one, forward, it never names:
@@ -221,7 +277,7 @@ const (
 func TunnelFronts(action string) []string {
 	switch action {
 	case ActionTunnel:
-		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal, FrontVPN}
+		return []string{FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal, FrontVPN, FrontRDP, FrontVNC, FrontSSH, FrontTelnet}
 	case ActionReverseTunnel:
 		return []string{FrontForward}
 	}
@@ -284,10 +340,10 @@ func TunnelCoreParams(action string) []FieldSpec {
 // bind, listen and udp: orders 1 to 3), and stop_idle and the cap last; a
 // command's own params take orders from 10. A tunnel's apply by its front
 // (When): its port every front's but a VPN's (whose client comes over
-// core's own address), its routes a VPN's, its destination a forward's
-// alone, its program a terminal's. A reverse tunnel has one front, forward
-// (fronts nil): no param names it, and its destination is required. What
-// is seldom changed is Advanced.
+// core's own address), its routes a VPN's, its destination a forward's and
+// a desktop's, a desktop's login its own, its program a terminal's. A
+// reverse tunnel has one front, forward (fronts nil): no param names it,
+// and its destination is required. What is seldom changed is Advanced.
 func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 	reverse := action == ActionReverseTunnel
 	order := 0
@@ -301,7 +357,10 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 		}
 		return &FieldCondition{Key: ParamFront, Values: values}
 	}
-	host, to := "A forward's destination, reached from the minion's host: a name or an address.", "A forward's destination port."
+	host, to := "A forward's or a desktop's server, reached from the minion's host: a name or an address.",
+		"The destination's port: a desktop's, none for its protocol's (3389 RDP, 5900 VNC, 22 SSH, 23 Telnet)."
+	desktops := DesktopFronts()
+	withDesktops := func(fronts ...string) []string { return append(fronts, desktops...) }
 	if reverse {
 		host, to = "Where core connects each connection that comes, from its own network: a name or an address.", "The destination's port."
 	}
@@ -312,7 +371,7 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 				Description: "What core puts in front of the tunnel."},
 			FieldSpec{Key: ParamPort, Type: FieldInt, Label: "Port", Default: 0, Min: 0, Max: 65535, Order: next(),
 				Description: "The operational port core listens on: 0 for any free one.",
-				When:        on(FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal)},
+				When:        on(withDesktops(FrontSOCKS, FrontHTTP, FrontForward, FrontTerminal)...)},
 			FieldSpec{Key: ParamRoutes, Type: FieldStringList, Label: "Routes", Required: true, MaxItems: MaxTunnelRoutes,
 				MaxLength: maxTunnelRoute, Order: next(),
 				Description: "The networks logos-vpn routes on the operator's machine, as CIDRs (10.0.0.0/24, fd00:1::/64): every tool there reaches them through the minion. They can be changed while the tunnel runs.",
@@ -320,9 +379,9 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 	}
 	out = append(out,
 		FieldSpec{Key: ParamHost, Type: FieldString, Label: "Destination", Required: reverse, MaxLength: MaxTunnelHost, Order: next(),
-			Description: host, When: on(FrontForward)},
+			Description: host, When: on(withDesktops(FrontForward)...)},
 		FieldSpec{Key: ParamTo, Type: FieldInt, Label: "Destination port", Required: reverse, Min: 1, Max: 65535, Order: next(),
-			Description: to, When: on(FrontForward)})
+			Description: to, When: on(withDesktops(FrontForward)...)})
 	if !reverse {
 		// What a tunnel's command opens decides which of these core offers.
 		out = append(out,
@@ -331,7 +390,7 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 				When:        on(FrontForward)},
 			FieldSpec{Key: ParamSource, Type: FieldString, Label: "Source address", MaxLength: 64, Order: next(), Advanced: true,
 				Description: "An address of the minion's host its connections go from, on a host with two networks: none, as the host routes.",
-				When:        on(FrontSOCKS, FrontHTTP, FrontForward, FrontVPN)},
+				When:        on(withDesktops(FrontSOCKS, FrontHTTP, FrontForward, FrontVPN)...)},
 			FieldSpec{Key: ParamTLS, Type: FieldBool, Label: "TLS to the destination", Default: false, Order: next(),
 				Description: "The minion speaks TLS to the destination (it checks no certificate), the tools plain: a host and a port's, not a path's.",
 				When:        on(FrontForward)},
@@ -342,7 +401,22 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 			FieldSpec{Key: ParamRows, Type: FieldInt, Label: "Rows", Default: 24, Min: 1, Max: MaxTunnelTerm, Order: next(), Advanced: true,
 				Description: "The terminal's rows on the raw port: the web terminal says its own.", When: on(FrontTerminal)},
 			FieldSpec{Key: ParamCols, Type: FieldInt, Label: "Columns", Default: 80, Min: 1, Max: MaxTunnelTerm, Order: next(), Advanced: true,
-				Description: "The terminal's columns on the raw port.", When: on(FrontTerminal)})
+				Description: "The terminal's columns on the raw port.", When: on(FrontTerminal)},
+			FieldSpec{Key: ParamCredential, Type: FieldCredential, Label: "Login", Order: next(),
+				Accept:      []string{CredentialTypePlaintext, CredentialTypeKey},
+				Description: "The credential the desktop logs in with: a password, or for SSH a key. None: the desktop asks for what its server needs.",
+				When:        on(desktops...)},
+			FieldSpec{Key: ParamSecurity, Type: FieldEnum, Label: "Security", Default: RDPSecurity()[0], Order: next(), Advanced: true,
+				Options: []EnumOption{
+					{Value: "any", Label: "Any", Description: "Whatever the server takes."},
+					{Value: "nla", Label: "NLA", Description: "Network level authentication: the login before the session."},
+					{Value: "nla-ext", Label: "Extended NLA", Description: "NLA, its extended form."},
+					{Value: "tls", Label: "TLS", Description: "TLS, the login in the session."},
+					{Value: "vmconnect", Label: "Hyper-V console", Description: "A Hyper-V VM's console (vmconnect)."},
+					{Value: "rdp", Label: "RDP encryption", Description: "RDP's own encryption: old servers."}},
+				Description: "The security the RDP session negotiates.", When: on(FrontRDP)},
+			FieldSpec{Key: ParamIgnoreCert, Type: FieldBool, Label: "Take any certificate", Default: true, Order: next(), Advanced: true,
+				Description: "Take a server certificate that cannot be checked (a self-signed one, as most RDP servers have).", When: on(FrontRDP)})
 	}
 	idle, idleNote := "1h", "Core stops the tunnel once no connection has been open this long: 0s never."
 	if reverse {
@@ -412,7 +486,11 @@ var actions = map[string]CommandAction{
 		{Value: FrontHTTP, Label: "HTTP proxy", Description: "CONNECT, and plain requests: for the tools that speak no SOCKS."},
 		{Value: FrontForward, Label: "Port forward", Description: "Every connection to the port goes to the destination."},
 		{Value: FrontTerminal, Label: "Terminal", Description: "A shell, or the program it says, for each connection: in the web app, or raw on the port."},
-		{Value: FrontVPN, Label: "VPN", Description: "logos-vpn routes an operator's machine into the minion's networks: every tool there, scans and pings too."}})},
+		{Value: FrontVPN, Label: "VPN", Description: "logos-vpn routes an operator's machine into the minion's networks: every tool there, scans and pings too."},
+		{Value: FrontRDP, Label: "Remote desktop (RDP)", Description: "A Windows desktop in the web app; the port takes mstsc too."},
+		{Value: FrontVNC, Label: "VNC", Description: "A VNC server's screen in the web app; the port takes a VNC viewer too."},
+		{Value: FrontSSH, Label: "SSH login", Description: "An SSH server's login, in a terminal in the web app; the port takes ssh too."},
+		{Value: FrontTelnet, Label: "Telnet", Description: "A telnet server's login in the web app (network gear); the port takes a telnet client too."}})},
 	ActionReverseTunnel: {Params: map[string]FieldType{"bind": FieldString, "listen": FieldInt},
 		ByOpen: map[string]map[string]FieldType{OpenUDP: {"udp": FieldBool}},
 		Adds:   tunnelCoreParams(ActionReverseTunnel, nil)},
