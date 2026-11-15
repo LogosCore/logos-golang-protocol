@@ -195,20 +195,7 @@ const (
 	// (KEY), which core gives guacd each time a desktop opens; none: the
 	// desktop asks for what its server needs.
 	ParamCredential = "credential"
-	// ParamSecurity and ParamIgnoreCert are an RDP desktop's: the security
-	// it negotiates (RDPSecurity), and whether a server certificate guacd
-	// cannot check is taken.
-	ParamSecurity   = "security"
-	ParamIgnoreCert = "ignore_cert"
 )
-
-// RDPSecurity are an RDP desktop's security modes (ParamSecurity), as
-// guacd names them, the default first: any the server takes, network level
-// authentication, its extended form, TLS, Hyper-V's console (vmconnect), or
-// RDP's own encryption.
-func RDPSecurity() []string {
-	return []string{"any", "nla", "nla-ext", "tls", "vmconnect", "rdp"}
-}
 
 // Tunnel fronts: what core puts in front of a tunnel task's streams, the
 // operator's to pick as the task starts (ParamFront).
@@ -405,18 +392,7 @@ func tunnelCoreParams(action string, fronts []EnumOption) []FieldSpec {
 			FieldSpec{Key: ParamCredential, Type: FieldCredential, Label: "Login", Order: next(),
 				Accept:      []string{CredentialTypePlaintext, CredentialTypeKey},
 				Description: "The credential the desktop logs in with: a password, or for SSH a key. None: the desktop asks for what its server needs.",
-				When:        on(desktops...)},
-			FieldSpec{Key: ParamSecurity, Type: FieldEnum, Label: "Security", Default: RDPSecurity()[0], Order: next(), Advanced: true,
-				Options: []EnumOption{
-					{Value: "any", Label: "Any", Description: "Whatever the server takes."},
-					{Value: "nla", Label: "NLA", Description: "Network level authentication: the login before the session."},
-					{Value: "nla-ext", Label: "Extended NLA", Description: "NLA, its extended form."},
-					{Value: "tls", Label: "TLS", Description: "TLS, the login in the session."},
-					{Value: "vmconnect", Label: "Hyper-V console", Description: "A Hyper-V VM's console (vmconnect)."},
-					{Value: "rdp", Label: "RDP encryption", Description: "RDP's own encryption: old servers."}},
-				Description: "The security the RDP session negotiates.", When: on(FrontRDP)},
-			FieldSpec{Key: ParamIgnoreCert, Type: FieldBool, Label: "Take any certificate", Default: true, Order: next(), Advanced: true,
-				Description: "Take a server certificate that cannot be checked (a self-signed one, as most RDP servers have).", When: on(FrontRDP)})
+				When:        on(desktops...)})
 	}
 	idle, idleNote := "1h", "Core stops the tunnel once no connection has been open this long: 0s never."
 	if reverse {

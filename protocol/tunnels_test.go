@@ -161,7 +161,7 @@ func TestTunnelAction(t *testing.T) {
 			t.Errorf("%s: num %d, core's %v", p.Key, p.Num, IsCoreParam(ActionTunnel, p.Key))
 		}
 	}
-	if strings.Join(keys, ",") != "front,port,routes,host,to,path,source,tls,program,args,rows,cols,credential,security,ignore_cert,stop_idle,cap" {
+	if strings.Join(keys, ",") != "front,port,routes,host,to,path,source,tls,program,args,rows,cols,credential,stop_idle,cap" {
 		t.Errorf("core's params %v", keys)
 	}
 	front := TunnelCoreParams(ActionTunnel)[0]
@@ -340,7 +340,7 @@ func TestTunnelParamsByFront(t *testing.T) {
 		ParamSource: "socks,http,forward,vpn,rdp,vnc,ssh,telnet",
 		ParamPort:   "socks,http,forward,terminal,rdp,vnc,ssh,telnet", ParamRoutes: "vpn",
 		ParamProgram: "terminal", ParamArgs: "terminal", ParamRows: "terminal", ParamCols: "terminal",
-		ParamCredential: "rdp,vnc,ssh,telnet", ParamSecurity: "rdp", ParamIgnoreCert: "rdp",
+		ParamCredential: "rdp,vnc,ssh,telnet",
 	}
 	advanced := func(params []FieldSpec) string {
 		var keys []string
@@ -361,7 +361,7 @@ func TestTunnelParamsByFront(t *testing.T) {
 			t.Errorf("%s: when %q, want %q", p.Key, got, w)
 		}
 	}
-	if got := advanced(params); got != "source,rows,cols,security,ignore_cert,stop_idle,cap" {
+	if got := advanced(params); got != "source,rows,cols,stop_idle,cap" {
 		t.Errorf("tunnel's advanced: %s", got)
 	}
 	reverse := TunnelCoreParams(ActionReverseTunnel)
@@ -413,17 +413,15 @@ func TestTunnelParamsByFront(t *testing.T) {
 	if problems != nil || args[ParamTLS] != false || args[ParamRows] != nil || args[ParamHost] != "10.0.0.5" {
 		t.Errorf("a forward: %v %v", args, problems)
 	}
-	// A desktop: its destination, its login, an RDP one's security by the
-	// defaults; no forward's path or TLS, and an RDP's settings are no SSH
-	// login's.
+	// A desktop: its destination and its login; no forward's path or TLS,
+	// no terminal's size (how it is drawn is said as it opens: core's).
 	args, problems = TaskArgs(params, map[string]any{ParamFront: FrontRDP, ParamHost: "10.0.0.5", ParamCredential: "cred-1"})
-	if problems != nil || args[ParamSecurity] != "any" || args[ParamIgnoreCert] != true || args[ParamCredential] != "cred-1" ||
-		args[ParamTo] != nil || args[ParamTLS] != nil || args[ParamPath] != nil {
+	if problems != nil || keysOfArgs(args) != "cap,credential,front,host,port,stop_idle" || args[ParamCredential] != "cred-1" {
 		t.Errorf("an RDP desktop: %v %v", args, problems)
 	}
-	_, problems = TaskArgs(params, map[string]any{ParamFront: FrontSSH, ParamHost: "10.0.0.6", ParamSecurity: "nla", ParamTLS: true})
-	if problems[ParamSecurity] != "only when front is rdp" || problems[ParamTLS] != "only when front is forward" {
-		t.Errorf("an SSH login's security, TLS: %v", problems)
+	_, problems = TaskArgs(params, map[string]any{ParamFront: FrontSSH, ParamHost: "10.0.0.6", ParamRows: 30, ParamTLS: true})
+	if problems[ParamRows] != "only when front is terminal" || problems[ParamTLS] != "only when front is forward" {
+		t.Errorf("an SSH desktop's rows, TLS: %v", problems)
 	}
 	_, problems = TaskArgs(params, map[string]any{ParamCredential: "cred-1"})
 	if problems[ParamCredential] != "only when front is rdp, vnc, ssh or telnet" {
@@ -782,18 +780,5 @@ func TestDesktopFronts(t *testing.T) {
 	}
 	if DesktopPort(FrontRDP) != 3389 || DesktopPort(FrontVNC) != 5900 || DesktopPort(FrontSSH) != 22 || DesktopPort(FrontTelnet) != 23 {
 		t.Error("ports")
-	}
-	// The security param's options are RDPSecurity, its default the first.
-	for _, p := range TunnelCoreParams(ActionTunnel) {
-		if p.Key != ParamSecurity {
-			continue
-		}
-		var values []string
-		for _, o := range p.Options {
-			values = append(values, o.Value)
-		}
-		if !slices.Equal(values, RDPSecurity()) || p.Default != RDPSecurity()[0] {
-			t.Errorf("security %v (default %v)", values, p.Default)
-		}
 	}
 }
