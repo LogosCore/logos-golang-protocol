@@ -108,6 +108,10 @@ const (
 	// key say: the UI edits it in a box of several lines, its line breaks
 	// kept.
 	FormatMultiline = "multiline"
+	// FormatTimezone is a string: a time zone as IANA names it
+	// (Europe/Berlin, UTC). The UI suggests them as it is typed, each with
+	// its offset now.
+	FormatTimezone = "timezone"
 )
 
 // FieldSpec describes a typed value plus its constraints and UI hints. It is

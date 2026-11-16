@@ -230,6 +230,9 @@ func TestFieldFormat(t *testing.T) {
 	if err := validateFieldSpec(FieldSpec{Key: "conn", Type: FieldInt, Format: FormatConnection}); err != nil {
 		t.Errorf("connection format on an int: %v", err)
 	}
+	if err := validateFieldSpec(FieldSpec{Key: "tz", Type: FieldString, Format: FormatTimezone}); err != nil {
+		t.Errorf("timezone format: %v", err)
+	}
 	// A key over several lines is a secret.
 	if err := validateFieldSpec(FieldSpec{Key: "private_key", Type: FieldSecret, Format: FormatMultiline}); err != nil {
 		t.Errorf("multiline format on a secret: %v", err)
