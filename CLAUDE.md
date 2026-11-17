@@ -62,6 +62,7 @@ issues. Runnable examples are in `protocol/example_test.go`.
 A `vX.Y.Z` tag is the release: minor for anything on the wire or in a
 schema, patch for a fix that changes no format. A round tags the protocol,
 then moves the repositories that use it in dependency order (Contributing →
-Changing the Protocol, Releasing). Each new version gets its line on the
-docs' Protocol Releases page. Until a tag, other repositories build against
+Changing the Protocol, Releasing). The annotated tag's message says what
+the version brought (`vX.Y.Z: <subject>`): the tags are the release history,
+and the docs keep no versions. Until a tag, other repositories build against
 this checkout through a git-ignored `go.work`.
