@@ -227,19 +227,17 @@ type HelloItem struct {
 }
 
 // Sleep is a minion's check-in schedule: Interval milliseconds between
-// check-ins, spread by Jitter percent of it either way. Core marks a
+// check-ins, spread by Jitter percent of it either way; an interval of 0 is
+// no wait, the next check-in as soon as the last one ends. Core marks a
 // session late once a check-in is overdue by it.
 type Sleep struct {
 	Interval uint64 `cbor:"1,keyasint"`
 	Jitter   uint64 `cbor:"2,keyasint"`
 }
 
-// Validate refuses an interval of 0 and a jitter over 100.
+// Validate refuses a jitter over 100. Any interval is taken, 0 too.
 func (s Sleep) Validate() error {
-	switch {
-	case s.Interval == 0:
-		return errors.New("sleep: interval is at least 1 ms")
-	case s.Jitter > 100:
+	if s.Jitter > 100 {
 		return errors.New("sleep: jitter is 0 to 100 percent")
 	}
 	return nil
@@ -350,8 +348,11 @@ func (h HelloItem) Validate() error {
 		return fmt.Errorf("hello: %w", ValidateMachineID(h.MachineID()))
 	case h.MaxTasks != nil && *h.MaxTasks > MaxTasksLimit:
 		return fmt.Errorf("hello: max_tasks is %d at most", MaxTasksLimit)
-	case h.Sleep != nil:
-		return h.Sleep.Validate()
+	}
+	if h.Sleep != nil {
+		if err := h.Sleep.Validate(); err != nil {
+			return err
+		}
 	}
 	for _, a := range h.Addrs {
 		if len(a) != net.IPv4len && len(a) != net.IPv6len {

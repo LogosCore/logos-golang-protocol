@@ -160,7 +160,7 @@ func TestHello(t *testing.T) {
 		{PID: 1, OS: "linux", Arch: "amd64", MachineValue: "x"},
 		{PID: 1, OS: "linux", Arch: "amd64", MachineSource: MachineKept},
 		{PID: 1, OS: "linux", Arch: "amd64", SID: []byte{1, 2, 3}},
-		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 0}},
+		{PID: 1, OS: "linux", Arch: "amd64", Addrs: []net.IP{{1, 2, 3}}, Sleep: &Sleep{Interval: 1000}},
 		{PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 1000, Jitter: 101}},
 		{PID: 1, OS: "linux", Arch: "amd64", MaxTasks: &[]uint64{MaxTasksLimit + 1}[0]},
 	} {
@@ -209,6 +209,14 @@ func TestSleepUpdate(t *testing.T) {
 	var back HelloItem
 	if err := UnmarshalCBOR(data, &back); err != nil || back.Sleep == nil || *back.Sleep != *h.Sleep || back.Validate() != nil {
 		t.Fatalf("hello's sleep: %+v %v", back.Sleep, err)
+	}
+	// An interval of 0 is no wait between check-ins.
+	noWait := HelloItem{T: ItemHello, PID: 1, OS: "linux", Arch: "amd64", Sleep: &Sleep{Interval: 0, Jitter: 20}}
+	if err := noWait.Validate(); err != nil {
+		t.Fatalf("a hello with interval 0: %v", err)
+	}
+	if err := (SleepUpdateItem{T: ItemSleepUpdate}).Sleep().Validate(); err != nil {
+		t.Fatalf("a sleep_update with interval 0: %v", err)
 	}
 }
 
