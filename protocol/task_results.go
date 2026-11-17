@@ -39,6 +39,10 @@ const (
 	// ResultVolumes is the host's volumes (Volumes): its drives, the file
 	// systems it has mounted, each with where its files are.
 	ResultVolumes = "volumes"
+	// ResultScreenshot is a picture of the host's screen (Screenshot): the
+	// minion sends it as a file with a name and no path, core keeps it as a
+	// download's, and the data says which picture.
+	ResultScreenshot = "screenshot"
 )
 
 // Actions.
@@ -412,6 +416,7 @@ var results = map[string]bool{
 	ResultFileStream:   true,
 	ResultDirWalk:      true,
 	ResultVolumes:      true,
+	ResultScreenshot:   true,
 }
 
 // CommandAction is an action's contract: the params core gives when it runs a

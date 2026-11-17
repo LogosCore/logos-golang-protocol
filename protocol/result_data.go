@@ -36,6 +36,16 @@ type fileStreamWire struct {
 	X      map[string]any `cbor:"5,keyasint,omitempty"`
 }
 
+type screenshotWire struct {
+	Xfer    []byte         `cbor:"1,keyasint"`
+	Size    uint64         `cbor:"2,keyasint"`
+	SHA256  []byte         `cbor:"3,keyasint"`
+	Width   uint64         `cbor:"4,keyasint"`
+	Height  uint64         `cbor:"5,keyasint"`
+	Display string         `cbor:"6,keyasint,omitempty"`
+	X       map[string]any `cbor:"7,keyasint,omitempty"`
+}
+
 type dirWalkWire struct {
 	Root    string         `cbor:"1,keyasint"`
 	Folders uint64         `cbor:"2,keyasint"`
@@ -82,8 +92,8 @@ func (w volumesWire) named() Volumes {
 }
 
 // WireResultData encodes a result part's data as it travels: a
-// FileDownload, FileUpload, FileStream, DirWalk or Volumes numbered,
-// anything else (a factory's own shape) as ResultData does.
+// FileDownload, FileUpload, FileStream, Screenshot, DirWalk or Volumes
+// numbered, anything else (a factory's own shape) as ResultData does.
 func WireResultData(v any) (cbor.RawMessage, error) {
 	switch d := v.(type) {
 	case FileDownload:
@@ -98,6 +108,10 @@ func WireResultData(v any) (cbor.RawMessage, error) {
 		v = fileStreamWire(d)
 	case *FileStream:
 		v = fileStreamWire(*d)
+	case Screenshot:
+		v = screenshotWire(d)
+	case *Screenshot:
+		v = screenshotWire(*d)
 	case DirWalk:
 		v = dirWalkWire(d)
 	case *DirWalk:
@@ -132,6 +146,10 @@ func NamedResultData(result string, data cbor.RawMessage) (cbor.RawMessage, erro
 		var w fileStreamWire
 		err = cborDec.Unmarshal(data, &w)
 		named = FileStream(w)
+	case ResultScreenshot:
+		var w screenshotWire
+		err = cborDec.Unmarshal(data, &w)
+		named = Screenshot(w)
 	case ResultDirWalk:
 		var w dirWalkWire
 		err = cborDec.Unmarshal(data, &w)

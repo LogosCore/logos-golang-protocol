@@ -58,6 +58,34 @@ func TestReadFileDownload(t *testing.T) {
 	}
 }
 
+// A screenshot's data names its transfer and the picture's size in pixels;
+// it has no path, and a first chunk may name the file alone.
+func TestReadScreenshot(t *testing.T) {
+	xfer, sum := make([]byte, 16), make([]byte, 32)
+	good, _ := ResultData(Screenshot{Xfer: xfer, Size: 812345, SHA256: sum, Width: 1920, Height: 1080})
+	if s, err := ReadScreenshot(0, good); err != nil || s.Width != 1920 || s.Height != 1080 || s.Display != "" {
+		t.Fatalf("%+v %v", s, err)
+	}
+	for want, s := range map[string]Screenshot{
+		"xfer is 16 bytes":   {Xfer: xfer[:4], SHA256: sum, Width: 1, Height: 1},
+		"sha256 is 32 bytes": {Xfer: xfer, SHA256: sum[:4], Width: 1, Height: 1},
+		"width and height":   {Xfer: xfer, SHA256: sum, Width: 1920},
+	} {
+		data, _ := ResultData(s)
+		if _, err := ReadScreenshot(0, data); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v", want, err)
+		}
+	}
+	if !KnownResult(ResultScreenshot) {
+		t.Error("screenshot is not a known result")
+	}
+	total := uint64(3)
+	first := ChunkItem{T: ItemChunk, Xfer: xfer, Data: []byte("png"), Total: &total, Task: make([]byte, 16), Name: "screen.png"}
+	if err := first.Validate(); err != nil {
+		t.Errorf("a first chunk naming the file alone: %v", err)
+	}
+}
+
 // A command takes one file param at most; it has no default.
 func TestCommandFileParam(t *testing.T) {
 	file := FieldSpec{Key: "file", Type: FieldFile, Required: true, Accept: []string{".exe"}}

@@ -13,6 +13,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 	for name, c := range map[string]BuildCommand{
 		"neither":                 {ID: "ls"},
 		"a result alone":          {ID: "find", Result: ResultDirListing, Params: []FieldSpec{{Key: "name", Type: FieldString, Required: true}}},
+		"a screenshot":            {ID: "screenshot", Result: ResultScreenshot, Params: []FieldSpec{{Key: "display", Type: FieldString}}},
 		"list_dir":                listDir(path),
 		"list_dir, path required": listDir(FieldSpec{Key: "path", Type: FieldString, Required: true}),
 		"list_dir, more with defaults": listDir(FieldSpec{Key: "all", Type: FieldBool, Default: false}, path,
@@ -26,7 +27,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, volumes)`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, screenshot, volumes)`},
 		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delegate, delete_path, download_file, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},

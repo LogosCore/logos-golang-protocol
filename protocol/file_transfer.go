@@ -11,8 +11,9 @@ import (
 // File transfers (docs: contracts/minion-messages.md, File transfers): a
 // file moves in chunks, each acked with how far the receiver has it, so a
 // transfer resumes after a restart of either side. A minion sends one for a
-// download_file task; core sends one to a minion for an upload_file
-// task, the minion asking for each chunk with its ack (FileOffer).
+// download_file task, or a screenshot task's picture; core sends one to a
+// minion for an upload_file task, the minion asking for each chunk with its
+// ack (FileOffer).
 
 // MaxChunkData is the most a chunk carries.
 const MaxChunkData = 512 << 10
@@ -40,7 +41,9 @@ type ChunkItem struct {
 	SHA256 []byte `cbor:"5,keyasint,omitempty"`
 	// Task is the task the transfer is for: in the first chunk.
 	Task []byte `cbor:"6,keyasint,omitempty"`
-	// Name is the file's, as the sender has it (a path): in the first.
+	// Name is the file's, as the sender has it: its path on the host, or a
+	// name alone for a file on no file system (a screenshot's picture). In
+	// the first.
 	Name string `cbor:"7,keyasint,omitempty"`
 	// Ctx is the transfer's ctx (MaxTransferCtx): a minion's chunk sets it,
 	// core's chunks echo the last one the minion set.
@@ -213,4 +216,39 @@ func ReadFileStream(seq uint64, data cbor.RawMessage) (*FileStream, error) {
 		return nil, errors.New("file_stream: sha256 is 32 bytes")
 	}
 	return &f, nil
+}
+
+// Screenshot is a screenshot task's data: a picture of the host's screen,
+// which the minion made and sent in transfer Xfer as a file on no file
+// system (its first chunk's Name a name alone: screen.png), its size and
+// SHA-256, and the picture's size in pixels. Display is the screen, as the
+// host names it ("\\.\DISPLAY2", "HDMI-1"); empty for every screen in one
+// picture. Core keeps the picture, a PNG or a JPEG, as a download's file.
+type Screenshot struct {
+	Xfer    []byte `cbor:"xfer" json:"xfer"`
+	Size    uint64 `cbor:"size" json:"size"`
+	SHA256  []byte `cbor:"sha256" json:"sha256"`
+	Width   uint64 `cbor:"width" json:"width"`
+	Height  uint64 `cbor:"height" json:"height"`
+	Display string `cbor:"display,omitempty" json:"display,omitempty"`
+	// X holds a factory's own fields.
+	X map[string]any `cbor:"x,omitempty" json:"x,omitempty"`
+}
+
+// ReadScreenshot decodes a screenshot part's data and checks it. A
+// screenshot task gives its data in one part.
+func ReadScreenshot(seq uint64, data cbor.RawMessage) (*Screenshot, error) {
+	var s Screenshot
+	if err := cborDec.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("screenshot: %w", err)
+	}
+	switch {
+	case len(s.Xfer) != 16:
+		return nil, errors.New("screenshot: xfer is 16 bytes")
+	case len(s.SHA256) != 32:
+		return nil, errors.New("screenshot: sha256 is 32 bytes")
+	case s.Width == 0 || s.Height == 0:
+		return nil, errors.New("screenshot: width and height, in pixels")
+	}
+	return &s, nil
 }
