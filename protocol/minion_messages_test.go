@@ -466,3 +466,40 @@ func TestReackItem(t *testing.T) {
 		t.Error(ItemName(ItemReack))
 	}
 }
+
+func TestHelloConnections(t *testing.T) {
+	base := func() HelloItem {
+		return HelloItem{T: ItemHello, OS: "linux", Arch: "amd64", Conn: 2, Connections: []HelloConnection{
+			{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "tcp", Kind: KindReversePersistent, Name: "b"}}}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := MarshalCBOR(base())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back HelloItem
+	if err := UnmarshalCBOR(b, &back); err != nil || len(back.Connections) != 2 || back.Connections[1].Channel != "tcp" {
+		t.Fatalf("round trip: %v %+v", err, back.Connections)
+	}
+	for name, mod := range map[string]func(*HelloItem){
+		"empty list":   func(h *HelloItem) { h.Connections = []HelloConnection{} },
+		"conn past":    func(h *HelloItem) { h.Conn = 3 },
+		"no channel":   func(h *HelloItem) { h.Connections[0].Channel = "" },
+		"unknown kind": func(h *HelloItem) { h.Connections[0].Kind = "carrier-pigeon" },
+		"same name":    func(h *HelloItem) { h.Connections[1].Name = "a" },
+		"max_message":  func(h *HelloItem) { h.Connections[0].MaxMessage = MaxMinionMessageSize + 1 },
+	} {
+		h := base()
+		mod(&h)
+		if h.Validate() == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+	h := base()
+	h.Connections, h.Conn = nil, 9
+	if err := h.Validate(); err != nil {
+		t.Errorf("no list: conn is the build's to check: %v", err)
+	}
+}

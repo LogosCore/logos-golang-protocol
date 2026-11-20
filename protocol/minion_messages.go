@@ -216,14 +216,57 @@ type HelloItem struct {
 	// does not say.
 	Sleep *Sleep `cbor:"14,keyasint,omitempty"`
 	// Conn is the connection the minion says hello through: its place in
-	// the build's connections, from 1 (BuildRequest.Connections), so a
-	// minion carries no connection names. 0 when it does not say.
+	// its connections, from 1: Connections when the hello says them, else
+	// the build's (BuildRequest.Connections). 0 when it does not say.
 	Conn uint64 `cbor:"16,keyasint,omitempty"`
 	// MaxTasks is how many tasks the minion runs at once as it starts; nil
 	// when it does not say. Any minion may say it (one that runs a task at
 	// a time: 1); one whose factory declares BuildSchema.MaxTasks takes
 	// core's MaxTasksItem too, and must say it.
 	MaxTasks *uint64 `cbor:"17,keyasint,omitempty"`
+	// Connections are the minion's connections, in the order it tries
+	// them, when it says them: core uses them for the session in place of
+	// the build's. Nil: the build's.
+	Connections []HelloConnection `cbor:"18,keyasint,omitempty"`
+}
+
+// HelloConnection is one of a hello's connections: a build's connection
+// (BuildConnection) in numbered form, params and values by their fields'
+// numbers.
+type HelloConnection struct {
+	Channel    string                   `cbor:"1,keyasint"`
+	Kind       string                   `cbor:"2,keyasint"`
+	Name       string                   `cbor:"3,keyasint,omitempty"`
+	Version    uint64                   `cbor:"4,keyasint,omitempty"`
+	Params     map[uint64]any           `cbor:"5,keyasint,omitempty"`
+	Values     map[uint64]any           `cbor:"6,keyasint,omitempty"`
+	Failover   *HelloConnectionFailover `cbor:"7,keyasint,omitempty"`
+	MaxMessage uint64                   `cbor:"8,keyasint,omitempty"`
+}
+
+// HelloConnectionFailover is a hello connection's own failover settings
+// (ConnectionFailover).
+type HelloConnectionFailover struct {
+	Auto      *bool  `cbor:"1,keyasint,omitempty"`
+	FailAfter uint64 `cbor:"2,keyasint,omitempty"`
+}
+
+// Validate checks a hello connection's shape: a channel, a known kind, a
+// max_message within the protocol's. Whether core knows the channel and it
+// carries the kind is core's to check.
+func (c HelloConnection) Validate() error {
+	switch c.Kind {
+	case KindReverseCall, KindReversePersistent, KindBindCall, KindBindPersistent:
+	default:
+		return fmt.Errorf("hello: connection kind %q is not one", c.Kind)
+	}
+	switch {
+	case c.Channel == "":
+		return errors.New("hello: a connection's channel is required")
+	case c.MaxMessage > MaxMinionMessageSize:
+		return fmt.Errorf("hello: a connection's max_message is %d at most", MaxMinionMessageSize)
+	}
+	return nil
 }
 
 // Sleep is a minion's check-in schedule: Interval milliseconds between
@@ -348,6 +391,22 @@ func (h HelloItem) Validate() error {
 		return fmt.Errorf("hello: %w", ValidateMachineID(h.MachineID()))
 	case h.MaxTasks != nil && *h.MaxTasks > MaxTasksLimit:
 		return fmt.Errorf("hello: max_tasks is %d at most", MaxTasksLimit)
+	case h.Connections != nil && len(h.Connections) == 0:
+		return errors.New("hello: connections, when said, are one at least")
+	case len(h.Connections) > 0 && h.Conn > uint64(len(h.Connections)):
+		return errors.New("hello: conn is past its connections")
+	}
+	names := map[string]bool{}
+	for _, c := range h.Connections {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if c.Name != "" {
+			if names[c.Name] {
+				return fmt.Errorf("hello: connection name %q twice", c.Name)
+			}
+			names[c.Name] = true
+		}
 	}
 	if h.Sleep != nil {
 		if err := h.Sleep.Validate(); err != nil {
