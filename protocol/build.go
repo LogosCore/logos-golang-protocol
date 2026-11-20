@@ -1012,6 +1012,9 @@ func ValidateFile(f FieldSpec, file BuildFile) error {
 // schema, or a stream, which is a command's only: a name, no default, no
 // rules of a file's.
 func checkCommandParam(p FieldSpec) error {
+	if p.Type == FieldStructured {
+		return checkStructuredParam(p)
+	}
 	if p.Type != FieldStream {
 		return checkFieldSpec(p, scopeBuild)
 	}

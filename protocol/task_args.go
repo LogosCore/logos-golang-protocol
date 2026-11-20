@@ -56,6 +56,8 @@ func addProblem(p map[string]string, key, reason string) map[string]string {
 // taskArg is a valid value in its type's CBOR form.
 func taskArg(f FieldSpec, v any) (any, error) {
 	switch f.Type {
+	case FieldStructured:
+		return structuredArg(f, v)
 	case FieldInt, FieldBytes:
 		n, ok := AsInt64(v)
 		if !ok {

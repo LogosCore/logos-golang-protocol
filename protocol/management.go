@@ -613,11 +613,14 @@ func checkFieldSpec(f FieldSpec, scope fieldScope) error {
 			return fmt.Errorf("num must be 1 to %d", MaxFieldNumber)
 		}
 	}
-	if !fieldTypes[f.Type] {
+	if !fieldTypes[f.Type] && f.Type != FieldStructured {
 		return fmt.Errorf("invalid type %q", f.Type)
 	}
 	if f.Type == FieldFile && scope != scopeBuild {
 		return fmt.Errorf("type file is only for build schemas")
+	}
+	if f.Type == FieldStructured {
+		return fmt.Errorf("type structured is only for a command's params")
 	}
 	if isCredentialField(f.Type) && scope == scopeModule {
 		return fmt.Errorf("type %s is only for build and connection schemas: credentials belong to an operation", f.Type)
@@ -876,6 +879,9 @@ func ValidateValue(f FieldSpec, v any) error {
 			}
 			seen[s] = true
 		}
+	case FieldStructured:
+		_, err := structuredArg(f, v)
+		return err
 	case FieldStream:
 		s, ok := v.(string)
 		switch {
