@@ -29,7 +29,7 @@ issues. Runnable examples are in `protocol/example_test.go`.
 | | |
 |---|---|
 | The planes | `envelope.go` (the AMQP envelope: RPCs, replies, events), `messages.go` (the sync call's headers and messages), `link.go` (the control link), `connections.go` (connection sockets), `failover.go` |
-| Registration | `management.go` (the manifest, its RPCs), `action_conditions.go`, `logs.go` (live log streaming), `icon.go`, `connection.go` (a channel's minion connection schema), `build.go` and `build_ops.go` (a factory's build schema; build requests, progress and results), `build_log.go` (the live build log, `factory.build.log`), `error_codes.go` (minion error codes: their checks, and each build's own, drawn by core), `minion_config.go` (the numbered CBOR config core makes for a build), `credentials.go` |
+| Registration | `management.go` (the manifest, its RPCs), `action_conditions.go`, `logs.go` (live log streaming), `icon.go`, `connection.go` (a channel's minion connection schema), `build.go` and `build_ops.go` (a factory's build schema; build requests, progress and results), `build_log.go` (the live build log, `factory.build.log`), `composite.go` (composite commands: `factory.compose`, its calls, ends and decisions, and what a build and a session have), `error_codes.go` (minion error codes: their checks, and each build's own, drawn by core), `minion_config.go` (the numbered CBOR config core makes for a build), `credentials.go` |
 | Minion messages | `minion_messages.go` (the message, its item numbers, staging and hello), `minion_frame.go` and `crypto.go` (the sealed frame, the suites), `compression.go` (the packed item), `codecs.go`, `json_envelope.go` and `factory_link.go` (envelopes, and a factory's own over its link), `task_args.go`, `task_results.go`, `result_data.go`, `listings.go`, `volumes.go`, `file_transfer.go`, `identity.go`, `machine_id.go`, `feedback.go`, `max_tasks.go`, `tunnels.go`, `icmp.go`, `vpn.go`, `delegation.go` |
 | Shared | `validate.go`, `errors.go` (`ValidationError` and its codes), `doc.go` |
 
@@ -37,11 +37,12 @@ issues. Runnable examples are in `protocol/example_test.go`.
 
 - **The docs first.** A change to a contract goes on its page before the
   code, and the page's facts are read from here (logos-docs, Contributing →
-  Changing the Protocol). Five tests copy the docs' examples verbatim
+  Changing the Protocol). Six tests copy the docs' examples verbatim
   (`TestBuildSchemaDocExample`, `TestBuildRequestDocExample` and
   `TestBuildResultDocExamples` from Minion Build, `TestDocsConditionsExample`
-  from Module Management, `TestJSONEnvelopeDocExample` from Codecs): change
-  an example, change its test.
+  from Module Management, `TestJSONEnvelopeDocExample` from Codecs,
+  `TestComposeDocExamples` from Task Outsourcing): change an example, change
+  its test.
 - **Numbers are never reused**: item types and keys (the wire format's
   Registry, pinned by `TestRegistry`), error codes, a schema's field `num`s,
   commands' `op`s and params' `num`s. A new one takes a number never used;

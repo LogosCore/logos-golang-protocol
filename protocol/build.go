@@ -251,7 +251,8 @@ type BuildCommand struct {
 	// Op is the command's number, unique in the schema, 1 to
 	// MaxCommandNumber: a task names its command by it on the wire
 	// (TaskItem.Cmd), so a minion needs no command names. Its params are
-	// numbered too (FieldSpec.Num).
+	// numbered too (FieldSpec.Num). A composite command may have none (0):
+	// it is its subtasks alone, and its params have no num (HasOp).
 	Op          int    `json:"op"`
 	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -297,6 +298,16 @@ type BuildCommand struct {
 	// delegate command says it, and one must. A factory that serves other
 	// kinds on another target declares another command (Targets).
 	Serves []ChannelVersions `json:"serves,omitempty"`
+	// Composite has the factory's own code run the command's task
+	// (composite.go): it runs the session's other commands as subtasks,
+	// before and after the command's own op, or in its place for one with
+	// no op. No tunnel or delegate action.
+	Composite bool `json:"composite,omitempty"`
+	// Uses are the commands a composite's subtasks may run, by id: each has
+	// an op of its own, and is on every target the composite is on.
+	// Required with Composite, refused without; a build that picks the
+	// composite has them (PickCommands).
+	Uses []string `json:"uses,omitempty"`
 }
 
 // CanOpen reports whether the command's minion opens kind (OpenTCP,
@@ -620,10 +631,16 @@ func ValidateBuildSchema(s BuildSchema) error {
 		if err := validateCommandNumbers(c); err != nil {
 			return fmt.Errorf("command %q: %w", c.ID, err)
 		}
+		if !c.HasOp() {
+			continue
+		}
 		if other, dup := ops[c.Op]; dup {
 			return fmt.Errorf("command %q: op %d is %q's", c.ID, c.Op, other)
 		}
 		ops[c.Op] = c.ID
+	}
+	if err := validateComposites(s); err != nil {
+		return err
 	}
 	return validateErrorCodes(s)
 }
@@ -666,8 +683,17 @@ func IsCoreCommand(id string) bool {
 
 // validateCommandNumbers checks a command's op and its params' nums: each 1
 // to MaxCommandNumber, the nums once each; none for a param that is core's
-// alone (one its action adds), which never goes to the minion.
+// alone (one its action adds), which never goes to the minion, nor for any
+// of a composite with no op of its own, whose task never does.
 func validateCommandNumbers(c BuildCommand) error {
+	if c.Composite && !c.HasOp() {
+		for _, p := range c.Params {
+			if p.Num != 0 {
+				return fmt.Errorf("param %q: a composite with no op of its own numbers no params: its task never goes to the minion", p.Key)
+			}
+		}
+		return nil
+	}
 	if c.Op < 1 || c.Op > MaxCommandNumber {
 		return fmt.Errorf("op must be 1 to %d", MaxCommandNumber)
 	}
@@ -702,6 +728,9 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 		return err
 	}
 	if err := validateResultAction(c); err != nil {
+		return err
+	}
+	if err := validateComposite(c); err != nil {
 		return err
 	}
 	for i, t := range c.Targets {

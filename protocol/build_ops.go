@@ -31,7 +31,8 @@ const (
 )
 
 // CodeBusy is the factory.build error of an instance that already runs as
-// many builds as it can; core tries another instance.
+// many builds as it can, and the factory.compose one of an instance with as
+// many decisions at once as it takes; core tries another instance.
 const CodeBusy = "busy"
 
 // ChannelEndpointExportV2 is the format of a channel endpoint export: a
@@ -508,11 +509,15 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 }
 
 // checkCommands checks a build's commands for target t: each one of the
-// target's, listed once, with every required one among them. Problems are
-// keyed "commands[<i>]", and "commands" for the required ones missing.
+// target's with an op of its own, listed once, with what each composite
+// among them uses and every required one. Problems are keyed
+// "commands[<i>]", and "commands" for the required ones missing.
 func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]string {
 	problems := map[string]string{}
 	listed := make(map[string]bool, len(commands))
+	for _, id := range commands {
+		listed[id] = true
+	}
 	for i, id := range commands {
 		key := fmt.Sprintf("commands[%d]", i)
 		c, ok := s.Command(id)
@@ -521,10 +526,21 @@ func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]s
 			problems[key] = fmt.Sprintf("%q is not a command of this factory", id)
 		case !c.For(t.ID):
 			problems[key] = fmt.Sprintf("%q is not a command of target %q", id, t.ID)
-		case listed[id]:
+		case slices.Contains(commands[:i], id):
 			problems[key] = fmt.Sprintf("%q is listed twice", id)
+		case !c.HasOp():
+			problems[key] = fmt.Sprintf("%q builds nothing: a session has it once its build has every command it uses", id)
+		default:
+			var lacking []string
+			for _, u := range c.Uses {
+				if !listed[u] {
+					lacking = append(lacking, u)
+				}
+			}
+			if len(lacking) > 0 {
+				problems[key] = fmt.Sprintf("%q uses %s, which the build lacks", id, strings.Join(lacking, ", "))
+			}
 		}
-		listed[id] = true
 	}
 	var missing []string
 	for _, c := range s.TargetCommands(t) {
