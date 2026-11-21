@@ -8,21 +8,22 @@ import (
 )
 
 // Feedback (docs: contracts/minion-messages/sessions, Feedback): a minion's
-// warnings and errors, for its operators: what it would otherwise only log
-// on the host (check-ins that failed, a connection that dropped, a task that
-// crashed). Any minion may send it, in any message, on every connection
-// kind; core keeps it with the session and answers nothing: a message that
-// went is the feedback delivered, and one sent again adds nothing, core
-// keeping one entry per id.
+// warnings, errors and information, for its operators: what it would
+// otherwise only log on the host (check-ins that failed, a connection that
+// dropped, a task that crashed; a fallback it took). Any minion may send it,
+// in any message, on every connection kind; core keeps it with the session
+// and answers nothing: a message that went is the feedback delivered, and
+// one sent again adds nothing, core keeping one entry per id.
 
-// FeedbackItem is one warning or error (minion → core).
+// FeedbackItem is one warning, error or piece of information (minion → core).
 type FeedbackItem struct {
 	T int `cbor:"0,keyasint"`
 	// ID is the minion's own, FeedbackIDSize random bytes: core keeps one
 	// entry per id in a session, so a resent message adds nothing.
 	ID []byte `cbor:"1,keyasint"`
-	// Level is FeedbackWarning or FeedbackError; a later version may add
-	// levels: a reader takes one it does not know as a warning.
+	// Level is FeedbackWarning, FeedbackError or FeedbackInfo; a later
+	// version may add levels: a reader takes one it does not know as a
+	// warning.
 	Level int `cbor:"2,keyasint"`
 	// Msg says what happened, for people: MaxFeedbackMsg bytes at most.
 	Msg string `cbor:"3,keyasint"`
@@ -40,10 +41,12 @@ type FeedbackItem struct {
 	Count uint64 `cbor:"7,keyasint,omitempty"`
 }
 
-// Feedback levels.
+// Feedback levels. Info is no trouble but worth the operators' knowing:
+// core shows it, and counts it nowhere as unread.
 const (
 	FeedbackWarning = 1
 	FeedbackError   = 2
+	FeedbackInfo    = 3
 )
 
 // Feedback limits.
@@ -62,7 +65,7 @@ func (f FeedbackItem) Validate() error {
 	case len(f.ID) != FeedbackIDSize:
 		return fmt.Errorf("feedback: id is %d bytes", FeedbackIDSize)
 	case f.Level < 1:
-		return errors.New("feedback: level is 1 (warning), 2 (error) or a later one")
+		return errors.New("feedback: level is 1 (warning), 2 (error), 3 (info) or a later one")
 	case f.Msg == "":
 		return errors.New("feedback: a message")
 	case len(f.Msg) > MaxFeedbackMsg:
@@ -77,11 +80,14 @@ func (f FeedbackItem) Validate() error {
 	return nil
 }
 
-// FeedbackLevelName is a level's name: "warning", "error"; a level this
-// version does not know is a warning.
+// FeedbackLevelName is a level's name: "warning", "error", "info"; a level
+// this version does not know is a warning.
 func FeedbackLevelName(level int) string {
-	if level == FeedbackError {
+	switch level {
+	case FeedbackError:
 		return "error"
+	case FeedbackInfo:
+		return "info"
 	}
 	return "warning"
 }

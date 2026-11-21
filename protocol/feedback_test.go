@@ -20,8 +20,16 @@ func TestFeedback(t *testing.T) {
 		ItemType(data) != ItemFeedback || ItemName(ItemFeedback) != "feedback" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if FeedbackLevelName(FeedbackError) != "error" || FeedbackLevelName(FeedbackWarning) != "warning" || FeedbackLevelName(9) != "warning" {
+	if FeedbackLevelName(FeedbackError) != "error" || FeedbackLevelName(FeedbackWarning) != "warning" ||
+		FeedbackLevelName(FeedbackInfo) != "info" || FeedbackLevelName(9) != "warning" {
 		t.Fatal("level names")
+	}
+	if FeedbackWarning != 1 || FeedbackError != 2 || FeedbackInfo != 3 {
+		t.Fatal("level numbers: the docs' (wire format, Registry)")
+	}
+	info := FeedbackItem{ID: make([]byte, 8), Level: FeedbackInfo, Msg: "a fallback taken"}
+	if info.Validate() != nil {
+		t.Fatal("info refused")
 	}
 	ok := FeedbackItem{ID: make([]byte, 8), Level: 9, Msg: "a later level"}
 	if ok.Validate() != nil {
