@@ -232,6 +232,12 @@ type HelloItem struct {
 	// them, when it says them: core uses them for the session in place of
 	// the build's. Nil: the build's.
 	Connections []HelloConnection `cbor:"18,keyasint,omitempty"`
+	// RoundtripTime is the round trip the minion measured on its latest
+	// exchange before the hello, in milliseconds: from sending a message to
+	// core to the reply that answers it. nil when it has none to say (no
+	// exchange yet, or a bind-call minion, which only answers); 0 is a
+	// round trip under a millisecond.
+	RoundtripTime *uint64 `cbor:"19,keyasint,omitempty"`
 }
 
 // HelloConnection is one of a hello's connections: a build's connection

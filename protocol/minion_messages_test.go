@@ -198,6 +198,27 @@ func TestMaxTasks(t *testing.T) {
 	}
 }
 
+// A hello's roundtrip_time is key 19, in milliseconds; 0 (under a
+// millisecond) travels, absent decodes as nil.
+func TestHelloRoundtripTime(t *testing.T) {
+	for _, ms := range []uint64{0, 142} {
+		data, _ := MarshalCBOR(HelloItem{T: ItemHello, PID: 1, OS: "linux", Arch: "amd64", RoundtripTime: &ms})
+		var raw map[int]any
+		if err := UnmarshalCBOR(data, &raw); err != nil || raw[19] != ms {
+			t.Fatalf("key 19 of %d ms: %v %v", ms, raw[19], err)
+		}
+		var h HelloItem
+		if err := UnmarshalCBOR(data, &h); err != nil || h.RoundtripTime == nil || *h.RoundtripTime != ms || h.Validate() != nil {
+			t.Fatalf("hello %+v %v", h, err)
+		}
+	}
+	data, _ := MarshalCBOR(HelloItem{T: ItemHello, PID: 1, OS: "linux", Arch: "amd64"})
+	var h HelloItem
+	if err := UnmarshalCBOR(data, &h); err != nil || h.RoundtripTime != nil {
+		t.Fatalf("a hello without it: %+v %v", h, err)
+	}
+}
+
 func TestSleepUpdate(t *testing.T) {
 	data, _ := MarshalCBOR(SleepUpdateItem{T: ItemSleepUpdate, Interval: 60000, Jitter: 20})
 	var got SleepUpdateItem
