@@ -28,7 +28,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		want string
 	}{
 		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, screenshot, volumes)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delegate, delete_path, download_file, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -71,6 +71,22 @@ func TestCommandResultsAndActions(t *testing.T) {
 	connect.Params[0].Type = FieldString
 	if err := validateBuildCommand(connect, nil); err == nil || !strings.Contains(err.Error(), `takes a int param "conn"`) {
 		t.Errorf("switch_connection with a text conn: %v", err)
+	}
+	// edit_connection: conn and connection, no result.
+	editConn := BuildCommand{ID: "edit", Action: ActionEditConnection, Params: []FieldSpec{
+		{Key: "conn", Num: 1, Type: FieldInt, Required: true, Min: 1, Format: FormatConnection},
+		{Key: "connection", Num: 2, Type: FieldStructured, Required: true, Format: FormatConnection}}}
+	if err := validateBuildCommand(editConn, nil); err != nil {
+		t.Errorf("edit_connection: %v", err)
+	}
+	editConn.Params[1].Type = FieldString
+	editConn.Params[1].Format = ""
+	if err := validateBuildCommand(editConn, nil); err == nil || !strings.Contains(err.Error(), `param "connection"`) {
+		t.Errorf("edit_connection with a text connection: %v", err)
+	}
+	editConn.Params = editConn.Params[:1]
+	if err := validateBuildCommand(editConn, nil); err == nil {
+		t.Error("edit_connection without connection: taken")
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")
