@@ -265,6 +265,12 @@ type BuildCommand struct {
 	// minion cannot run without them (sleep, exit), so the operator cannot
 	// leave them out.
 	Required bool `json:"required,omitempty"`
+	// Legacy is a command the factory's minions no longer get, kept for the
+	// builds that have it (a retired command, or a renamed one's old id and
+	// op): never default or required, refused in a new build
+	// (ValidateBuildRequest), used by no composite, and serving no action
+	// (ServedAction). Its sessions run it as before.
+	Legacy bool `json:"legacy,omitempty"`
 	// Params are what a task of the command takes: field specs as a
 	// management action's, file aside.
 	Params []FieldSpec `json:"params,omitempty"`
@@ -481,6 +487,16 @@ func (s BuildSchema) TargetCommands(t BuildTarget) []BuildCommand {
 		}
 	}
 	return out
+}
+
+// ServedAction is the action core and the web app may run c for: its
+// Action, none for a legacy command, which a task typed in the console runs
+// as it always did.
+func (c BuildCommand) ServedAction() string {
+	if c.Legacy {
+		return ""
+	}
+	return c.Action
 }
 
 // DefaultCommands returns the ids of the commands a build of t gets when it
@@ -732,6 +748,9 @@ func validateBuildCommand(c BuildCommand, targets map[string]bool) error {
 	}
 	if err := validateComposite(c); err != nil {
 		return err
+	}
+	if c.Legacy && (c.Default || c.Required) {
+		return fmt.Errorf("a legacy command is neither default nor required: no new build has it")
 	}
 	for i, t := range c.Targets {
 		if !targets[t] {

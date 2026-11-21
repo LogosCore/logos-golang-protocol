@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -451,5 +452,43 @@ func TestIsLink(t *testing.T) {
 		if got := IsLink(s); got != want {
 			t.Errorf("IsLink(%q) = %v, want %v", s, got, want)
 		}
+	}
+}
+
+// A legacy command stays in the schema for the builds that have it: never
+// default or required, used by no composite, refused in a new build, and
+// serving no action.
+func TestLegacyCommand(t *testing.T) {
+	s := exampleBuildSchema(t)
+	i := slices.IndexFunc(s.Commands, func(c BuildCommand) bool { return c.ID == "screenshot" })
+	s.Commands[i].Legacy, s.Commands[i].Action, s.Commands[i].Result = true, ActionListVolumes, ResultVolumes
+	if err := ValidateBuildSchema(s); err != nil {
+		t.Fatalf("a legacy command: %v", err)
+	}
+	if got := s.Commands[i].ServedAction(); got != "" {
+		t.Fatalf("a legacy command serves %q", got)
+	}
+	if c := (BuildCommand{Action: ActionListVolumes}); c.ServedAction() != ActionListVolumes {
+		t.Fatal("a current command serves no action")
+	}
+	r := exampleBuildRequest(t)
+	if p := ValidateBuildRequest(s, r); p["commands[4]"] != `"screenshot" is legacy: only the builds that have it keep it` || len(p) != 1 {
+		t.Fatalf("a new build with it: %v", p)
+	}
+	for _, mark := range []func(*BuildCommand){func(c *BuildCommand) { c.Default = true }, func(c *BuildCommand) { c.Required = true }} {
+		bad := exampleBuildSchema(t)
+		bad.Commands[i].Legacy = true
+		mark(&bad.Commands[i])
+		if err := ValidateBuildSchema(bad); err == nil || !strings.Contains(err.Error(), "neither default nor required") {
+			t.Errorf("legacy and default or required: %v", err)
+		}
+	}
+	uses := BuildSchema{Commands: []BuildCommand{{ID: "old", Op: 1, Legacy: true}, {ID: "both", Op: 2, Composite: true, Uses: []string{"old"}}}}
+	if err := validateComposites(uses); err == nil || !strings.Contains(err.Error(), `"old" is legacy`) {
+		t.Fatalf("a composite using a legacy command: %v", err)
+	}
+	uses.Commands[1].Legacy = true
+	if err := validateComposites(uses); err != nil {
+		t.Fatalf("a legacy composite using one: %v", err)
 	}
 }

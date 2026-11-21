@@ -126,6 +126,27 @@ func taskArg(f FieldSpec, v any) (any, error) {
 	return v, nil
 }
 
+// FieldJSONValue is a value in its type's CBOR form (a task's arg, a
+// connection's param as a minion says it) as its JSON value, the inverse of
+// TaskArgs: a duration from milliseconds to Go's text ("1s", "1m30s"), a
+// datetime from unix seconds to RFC 3339 in UTC. Any other type's value, or
+// one not in that form, comes back as it is.
+func FieldJSONValue(f FieldSpec, v any) any {
+	n, ok := AsInt64(v)
+	if u, isU := v.(uint64); isU {
+		// CBOR's unsigned integers, and TaskArgs's durations.
+		n, ok = int64(min(u, math.MaxInt64)), true //nolint:gosec // capped
+	}
+	switch {
+	case !ok:
+	case f.Type == FieldDuration && n >= 0 && n <= math.MaxInt64/int64(time.Millisecond):
+		return (time.Duration(n) * time.Millisecond).String()
+	case f.Type == FieldDatetime:
+		return time.Unix(n, 0).UTC().Format(time.RFC3339)
+	}
+	return v
+}
+
 // WireArgs are a task's args as it carries them: args (TaskArgs, by param
 // key) by their params' numbers (FieldSpec.Num). An arg whose param has no
 // number is left out. A credential param's arg is to be its Credential, a

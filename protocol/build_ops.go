@@ -526,6 +526,8 @@ func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]s
 			problems[key] = fmt.Sprintf("%q is not a command of this factory", id)
 		case !c.For(t.ID):
 			problems[key] = fmt.Sprintf("%q is not a command of target %q", id, t.ID)
+		case c.Legacy:
+			problems[key] = fmt.Sprintf("%q is legacy: only the builds that have it keep it", id)
 		case slices.Contains(commands[:i], id):
 			problems[key] = fmt.Sprintf("%q is listed twice", id)
 		case !c.HasOp():

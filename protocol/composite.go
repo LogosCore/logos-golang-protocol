@@ -691,6 +691,8 @@ func validateComposites(s BuildSchema) error {
 				return fmt.Errorf("command %q: uses: %q is not a command of this factory", c.ID, id)
 			case !u.HasOp():
 				return fmt.Errorf("command %q: uses: %q has no op of its own, and a subtask runs a command's op", c.ID, id)
+			case u.Legacy && !c.Legacy:
+				return fmt.Errorf("command %q: uses: %q is legacy, which no new build has", c.ID, id)
 			}
 			for _, t := range s.Targets {
 				if c.For(t.ID) && !u.For(t.ID) {

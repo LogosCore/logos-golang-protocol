@@ -62,3 +62,35 @@ func TestTaskArgs(t *testing.T) {
 		}
 	}
 }
+
+// FieldJSONValue undoes TaskArgs's conversion: what TaskArgs makes of a
+// value reads back as a value TaskArgs takes, the same.
+func TestFieldJSONValue(t *testing.T) {
+	params := []FieldSpec{
+		{Key: "every", Type: FieldDuration}, {Key: "long", Type: FieldDuration}, {Key: "at", Type: FieldDatetime},
+		{Key: "n", Type: FieldInt}, {Key: "s", Type: FieldString},
+	}
+	in := map[string]any{"every": "1s", "long": "1m30s", "at": "2026-11-21T15:00:00Z", "n": int64(7), "s": "/new/2"}
+	args, p := TaskArgs(params, in)
+	if p != nil {
+		t.Fatal(p)
+	}
+	back := map[string]any{}
+	for _, f := range params {
+		back[f.Key] = FieldJSONValue(f, args[f.Key])
+	}
+	if back["every"] != "1s" || back["long"] != "1m30s" || back["at"] != "2026-11-21T15:00:00Z" || back["n"] != int64(7) || back["s"] != "/new/2" {
+		t.Fatalf("read back %v", back)
+	}
+	if again, p := TaskArgs(params, back); p != nil || again["every"] != args["every"] || again["at"] != args["at"] {
+		t.Fatalf("taken again: %v %v", again, p)
+	}
+	// As a minion says them: CBOR's unsigned integers; and a value already
+	// JSON's stays.
+	if got := FieldJSONValue(params[0], uint64(40000)); got != "40s" {
+		t.Fatalf("40000 ms: %v", got)
+	}
+	if got := FieldJSONValue(params[0], "30s"); got != "30s" {
+		t.Fatalf("a duration's text: %v", got)
+	}
+}

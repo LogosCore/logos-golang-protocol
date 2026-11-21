@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -8,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // Structured values (docs: contracts/minion-build.md, Structured values): a
@@ -378,4 +381,169 @@ func connectionValues(fields []FieldSpec, values map[string]any) (map[uint64]any
 		}
 	}
 	return out, nil
+}
+
+// ConnectionPatch is what an edit_connection task carries for its
+// connection (docs: contracts/task-results-and-actions.md, The patch): what
+// changed of the connection at its place. With Channel and Kind (Whole),
+// the connection whole, in place of the old one: its params follow another
+// schema. Else only what differs: the Params and Values that changed, a nil
+// value for one gone, and Name, Version, Failover and MaxMessage when they
+// change. DiffConnection makes one; Apply takes it.
+type ConnectionPatch struct {
+	Channel    string                   `cbor:"1,keyasint,omitempty"`
+	Kind       string                   `cbor:"2,keyasint,omitempty"`
+	Name       string                   `cbor:"3,keyasint,omitempty"`
+	Version    *uint64                  `cbor:"4,keyasint,omitempty"`
+	Params     map[uint64]any           `cbor:"5,keyasint,omitempty"`
+	Values     map[uint64]any           `cbor:"6,keyasint,omitempty"`
+	Failover   *HelloConnectionFailover `cbor:"7,keyasint,omitempty"`
+	MaxMessage *uint64                  `cbor:"8,keyasint,omitempty"`
+}
+
+// Whole reports whether p is a connection whole (it names a channel and a
+// kind) rather than a difference.
+func (p ConnectionPatch) Whole() bool { return p.Channel != "" || p.Kind != "" }
+
+// Empty reports whether p changes nothing.
+func (p ConnectionPatch) Empty() bool {
+	return !p.Whole() && p.Name == "" && p.Version == nil && len(p.Params) == 0 && len(p.Values) == 0 && p.Failover == nil &&
+		p.MaxMessage == nil
+}
+
+// Validate checks p's shape: a channel and a kind together, a whole one as
+// a hello's connection; a max_message within the protocol's.
+func (p ConnectionPatch) Validate() error {
+	if p.Whole() {
+		if p.Channel == "" || p.Kind == "" {
+			return fmt.Errorf("a connection patch names a channel and a kind together, or neither")
+		}
+		return p.Apply(HelloConnection{}).Validate()
+	}
+	if p.MaxMessage != nil && *p.MaxMessage > MaxMinionMessageSize {
+		return fmt.Errorf("max_message is %d at most", MaxMinionMessageSize)
+	}
+	return nil
+}
+
+// DiffConnection is what changes old into new, both in their numbered
+// forms with defaults filled in (ConnectionArg): new whole when its channel
+// or kind differs, else what differs of it.
+func DiffConnection(old, new HelloConnection) ConnectionPatch {
+	if old.Channel != new.Channel || old.Kind != new.Kind {
+		p := ConnectionPatch{Channel: new.Channel, Kind: new.Kind, Name: new.Name, Params: new.Params, Values: new.Values,
+			Failover: new.Failover}
+		if new.Version != 0 {
+			p.Version = &new.Version
+		}
+		if new.MaxMessage != 0 {
+			p.MaxMessage = &new.MaxMessage
+		}
+		return p
+	}
+	var p ConnectionPatch
+	if new.Name != old.Name {
+		p.Name = new.Name
+	}
+	if new.Version != old.Version {
+		p.Version = &new.Version
+	}
+	p.Params, p.Values = diffArgs(old.Params, new.Params), diffArgs(old.Values, new.Values)
+	if !equalCBOR(old.Failover, new.Failover) {
+		p.Failover = new.Failover
+		if p.Failover == nil {
+			// None now: the defaults, said.
+			p.Failover = &HelloConnectionFailover{}
+		}
+	}
+	if new.MaxMessage != old.MaxMessage {
+		p.MaxMessage = &new.MaxMessage
+	}
+	return p
+}
+
+// Apply is old with p made: p whole in its place, or old with what p
+// changes.
+func (p ConnectionPatch) Apply(old HelloConnection) HelloConnection {
+	if p.Whole() {
+		c := HelloConnection{Channel: p.Channel, Kind: p.Kind, Name: p.Name, Params: p.Params, Values: p.Values, Failover: p.Failover}
+		if p.Version != nil {
+			c.Version = *p.Version
+		}
+		if p.MaxMessage != nil {
+			c.MaxMessage = *p.MaxMessage
+		}
+		return c
+	}
+	c := old
+	if p.Name != "" {
+		c.Name = p.Name
+	}
+	if p.Version != nil {
+		c.Version = *p.Version
+	}
+	c.Params, c.Values = applyArgs(old.Params, p.Params), applyArgs(old.Values, p.Values)
+	if p.Failover != nil {
+		c.Failover = p.Failover
+	}
+	if p.MaxMessage != nil {
+		c.MaxMessage = *p.MaxMessage
+	}
+	return c
+}
+
+// diffArgs are the numbers whose values differ from old to new, with their
+// new values, nil for one new does not have; nil when none differs.
+func diffArgs(old, new map[uint64]any) map[uint64]any {
+	var out map[uint64]any
+	set := func(n uint64, v any) {
+		if out == nil {
+			out = map[uint64]any{}
+		}
+		out[n] = v
+	}
+	for n, v := range new {
+		if was, ok := old[n]; !ok || !equalCBOR(was, v) {
+			set(n, v)
+		}
+	}
+	for n := range old {
+		if _, ok := new[n]; !ok {
+			set(n, nil)
+		}
+	}
+	return out
+}
+
+// applyArgs is old with changes made: a nil value removes its number.
+func applyArgs(old, changes map[uint64]any) map[uint64]any {
+	if len(changes) == 0 {
+		return old
+	}
+	out := make(map[uint64]any, len(old)+len(changes))
+	for n, v := range old {
+		out[n] = v
+	}
+	for n, v := range changes {
+		if v == nil {
+			delete(out, n)
+		} else {
+			out[n] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// canonicalCBOR encodes for comparing: map keys sorted, so equal values
+// encode alike (an int and a uint64 of one value too).
+var canonicalCBOR, _ = cbor.EncOptions{Sort: cbor.SortCanonical, ShortestFloat: cbor.ShortestFloat16}.EncMode()
+
+// equalCBOR reports whether a and b are the same in CBOR.
+func equalCBOR(a, b any) bool {
+	ba, ea := canonicalCBOR.Marshal(a)
+	bb, eb := canonicalCBOR.Marshal(b)
+	return ea == nil && eb == nil && bytes.Equal(ba, bb)
 }
