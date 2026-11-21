@@ -442,10 +442,14 @@ func validateConnections(conns []HelloConnection) error {
 
 // ConnectionUpdateItem says the minion's connections again, whenever they
 // change (minion → core), as a hello's Connections: core replaces the
-// session's with them. The connection in use keeps its place.
+// session's with them. The connection in use keeps its place, unless Conn
+// says where it is now: a list that moved it (one before it removed,
+// remove_connection) says its new place, which core takes as the same
+// connection, recording no move. 0: the place it had.
 type ConnectionUpdateItem struct {
 	T           int               `cbor:"0,keyasint"`
 	Connections []HelloConnection `cbor:"1,keyasint"`
+	Conn        uint64            `cbor:"2,keyasint,omitempty"`
 }
 
 // Validate checks the list: one connection at least, each as a hello's.
@@ -455,6 +459,9 @@ func (u ConnectionUpdateItem) Validate() error {
 	}
 	if err := validateConnections(u.Connections); err != nil {
 		return fmt.Errorf("connection_update: %w", err)
+	}
+	if u.Conn > uint64(len(u.Connections)) {
+		return fmt.Errorf("connection_update: conn %d is past its %d connections", u.Conn, len(u.Connections))
 	}
 	return nil
 }

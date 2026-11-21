@@ -28,7 +28,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		want string
 	}{
 		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, screenshot, volumes)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (add_connection, delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (add_connection, delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, remove_connection, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -106,6 +106,20 @@ func TestCommandResultsAndActions(t *testing.T) {
 	addConn.Params = nil
 	if err := validateBuildCommand(addConn, nil); err == nil {
 		t.Error("add_connection without connection: taken")
+	}
+	// remove_connection: conn alone, no result.
+	removeConn := BuildCommand{ID: "remove", Action: ActionRemoveConnection, Params: []FieldSpec{
+		{Key: "conn", Num: 1, Type: FieldInt, Required: true, Min: 1, Format: FormatConnection}}}
+	if err := validateBuildCommand(removeConn, nil); err != nil {
+		t.Errorf("remove_connection: %v", err)
+	}
+	if a, ok := KnownAction(ActionRemoveConnection); !ok || a.Result != "" || a.Params["conn"] != FieldInt || len(a.Params) != 1 {
+		t.Errorf("remove_connection's action: %+v %v", a, ok)
+	}
+	removeConn.Params[0].Type = FieldString
+	removeConn.Params[0].Format = ""
+	if err := validateBuildCommand(removeConn, nil); err == nil {
+		t.Error("remove_connection with a text conn: taken")
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")

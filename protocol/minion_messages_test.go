@@ -542,6 +542,24 @@ func TestConnectionUpdate(t *testing.T) {
 	if ItemName(ItemConnectionUpdate) != "connection_update" {
 		t.Error(ItemName(ItemConnectionUpdate))
 	}
+	// conn (key 2): where the one in use is now, within the list; absent, 0.
+	if back.Conn != 0 {
+		t.Fatalf("conn without one: %d", back.Conn)
+	}
+	u.Conn = 2
+	if b, _ = MarshalCBOR(u); UnmarshalCBOR(b, &back) != nil || back.Conn != 2 || back.Validate() != nil {
+		t.Fatalf("conn 2: %+v", back)
+	}
+	var key2 struct {
+		Conn uint64 `cbor:"2,keyasint"`
+	}
+	if err := UnmarshalCBOR(b, &key2); err != nil || key2.Conn != 2 {
+		t.Fatalf("key 2: %d %v", key2.Conn, err)
+	}
+	u.Conn = 3
+	if err := u.Validate(); err == nil || !strings.Contains(err.Error(), "past its 2 connections") {
+		t.Fatalf("conn past the list: %v", err)
+	}
 	for name, bad := range map[string][]HelloConnection{
 		"none":      nil,
 		"bad kind":  {{Channel: "http", Kind: "x"}},
