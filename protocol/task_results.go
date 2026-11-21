@@ -104,8 +104,8 @@ const (
 	// FormatConnection), and refuses the one in use, the only one and one a
 	// target names. The minion takes it out, the ones after it moving up a
 	// place, and says its connections again with a connection_update whose
-	// Conn is the place of the one in use when it moved. No result: the
-	// task's output says what it removed.
+	// Removed is the place it took out. No result: the task's output says
+	// what it removed.
 	ActionRemoveConnection = "remove_connection"
 	// ActionTunnel lends the minion's host to streams core opens
 	// (tunnels.go): each a connection the minion makes to where its tunnel

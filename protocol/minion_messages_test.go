@@ -542,23 +542,23 @@ func TestConnectionUpdate(t *testing.T) {
 	if ItemName(ItemConnectionUpdate) != "connection_update" {
 		t.Error(ItemName(ItemConnectionUpdate))
 	}
-	// conn (key 2): where the one in use is now, within the list; absent, 0.
-	if back.Conn != 0 {
-		t.Fatalf("conn without one: %d", back.Conn)
+	// removed (key 2): a place in the list before, one longer; absent, 0.
+	if back.Removed != 0 {
+		t.Fatalf("removed without one: %d", back.Removed)
 	}
-	u.Conn = 2
-	if b, _ = MarshalCBOR(u); UnmarshalCBOR(b, &back) != nil || back.Conn != 2 || back.Validate() != nil {
-		t.Fatalf("conn 2: %+v", back)
+	u.Removed = 3
+	if b, _ = MarshalCBOR(u); UnmarshalCBOR(b, &back) != nil || back.Removed != 3 || back.Validate() != nil {
+		t.Fatalf("removed 3 of the 3 it had: %+v", back)
 	}
 	var key2 struct {
-		Conn uint64 `cbor:"2,keyasint"`
+		Removed uint64 `cbor:"2,keyasint"`
 	}
-	if err := UnmarshalCBOR(b, &key2); err != nil || key2.Conn != 2 {
-		t.Fatalf("key 2: %d %v", key2.Conn, err)
+	if err := UnmarshalCBOR(b, &key2); err != nil || key2.Removed != 3 {
+		t.Fatalf("key 2: %d %v", key2.Removed, err)
 	}
-	u.Conn = 3
-	if err := u.Validate(); err == nil || !strings.Contains(err.Error(), "past its 2 connections") {
-		t.Fatalf("conn past the list: %v", err)
+	u.Removed = 4
+	if err := u.Validate(); err == nil || !strings.Contains(err.Error(), "past the 3 connections it had") {
+		t.Fatalf("removed past the list before: %v", err)
 	}
 	for name, bad := range map[string][]HelloConnection{
 		"none":      nil,

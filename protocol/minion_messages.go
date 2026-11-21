@@ -442,14 +442,14 @@ func validateConnections(conns []HelloConnection) error {
 
 // ConnectionUpdateItem says the minion's connections again, whenever they
 // change (minion → core), as a hello's Connections: core replaces the
-// session's with them. The connection in use keeps its place, unless Conn
-// says where it is now: a list that moved it (one before it removed,
-// remove_connection) says its new place, which core takes as the same
-// connection, recording no move. 0: the place it had.
+// session's with them. The connection in use keeps its place. Removed is
+// the place, in the list before, of a connection the minion took out
+// (remove_connection): the ones after it moved up, and core moves the
+// names it keeps and the place in use with them. 0: none taken out.
 type ConnectionUpdateItem struct {
 	T           int               `cbor:"0,keyasint"`
 	Connections []HelloConnection `cbor:"1,keyasint"`
-	Conn        uint64            `cbor:"2,keyasint,omitempty"`
+	Removed     uint64            `cbor:"2,keyasint,omitempty"`
 }
 
 // Validate checks the list: one connection at least, each as a hello's.
@@ -460,8 +460,9 @@ func (u ConnectionUpdateItem) Validate() error {
 	if err := validateConnections(u.Connections); err != nil {
 		return fmt.Errorf("connection_update: %w", err)
 	}
-	if u.Conn > uint64(len(u.Connections)) {
-		return fmt.Errorf("connection_update: conn %d is past its %d connections", u.Conn, len(u.Connections))
+	// A place in the list before: one longer than this one.
+	if u.Removed > uint64(len(u.Connections))+1 {
+		return fmt.Errorf("connection_update: removed %d is past the %d connections it had", u.Removed, len(u.Connections)+1)
 	}
 	return nil
 }
