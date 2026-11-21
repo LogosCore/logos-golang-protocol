@@ -91,6 +91,14 @@ const (
 	// the minion says its connections again with a connection_update
 	// (ConnectionUpdateItem).
 	ActionEditConnection = "edit_connection"
+	// ActionAddConnection gives the minion a connection it did not have:
+	// core gives connection, the connection whole, a structured param of
+	// FormatConnection (core sends its numbered form, ConnectionArg, whole:
+	// nothing to compare it with, so no ConnectionPatch). The minion puts
+	// it after its connections and says them again with a
+	// connection_update (ConnectionUpdateItem); it does not move to it. No
+	// result: the task's output says what it added.
+	ActionAddConnection = "add_connection"
 	// ActionTunnel lends the minion's host to streams core opens
 	// (tunnels.go): each a connection the minion makes to where its tunnel
 	// item says, or a UDP association. What core puts in front of them is
@@ -472,6 +480,7 @@ var actions = map[string]CommandAction{
 	ActionListVolumes:      {Result: ResultVolumes},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
 	ActionEditConnection:   {Params: map[string]FieldType{"conn": FieldInt, "connection": FieldStructured}},
+	ActionAddConnection:    {Params: map[string]FieldType{"connection": FieldStructured}},
 	ActionTunnel: {Adds: tunnelCoreParams(ActionTunnel, []EnumOption{
 		{Value: FrontSOCKS, Label: "SOCKS proxy", Description: "SOCKS5 (connect, UDP associate), SOCKS4 and 4a: each tool says where each connection goes."},
 		{Value: FrontHTTP, Label: "HTTP proxy", Description: "CONNECT, and plain requests: for the tools that speak no SOCKS."},

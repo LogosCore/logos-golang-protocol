@@ -28,7 +28,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 		want string
 	}{
 		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, screenshot, volumes)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (add_connection, delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -87,6 +87,25 @@ func TestCommandResultsAndActions(t *testing.T) {
 	editConn.Params = editConn.Params[:1]
 	if err := validateBuildCommand(editConn, nil); err == nil {
 		t.Error("edit_connection without connection: taken")
+	}
+	// add_connection: the connection alone, no result; more params need
+	// defaults (a switch once added).
+	addConn := BuildCommand{ID: "add", Action: ActionAddConnection, Params: []FieldSpec{
+		{Key: "connection", Num: 1, Type: FieldStructured, Required: true, Format: FormatConnection},
+		{Key: "switch", Num: 2, Type: FieldBool, Default: false}}}
+	if err := validateBuildCommand(addConn, nil); err != nil {
+		t.Errorf("add_connection: %v", err)
+	}
+	if a, ok := KnownAction(ActionAddConnection); !ok || a.Result != "" || a.Params["connection"] != FieldStructured || len(a.Params) != 1 {
+		t.Errorf("add_connection's action: %+v %v", a, ok)
+	}
+	addConn.Params[1].Default = nil
+	if err := validateBuildCommand(addConn, nil); err == nil {
+		t.Error("add_connection with a param without a default: taken")
+	}
+	addConn.Params = nil
+	if err := validateBuildCommand(addConn, nil); err == nil {
+		t.Error("add_connection without connection: taken")
 	}
 	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
 		t.Error("KnownResult")
