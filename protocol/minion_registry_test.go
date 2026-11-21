@@ -59,6 +59,8 @@ func TestRegistry(t *testing.T) {
 			[]uint64{0, 1, 2, 3, 4, 5, 6, 7, 8}},
 		{ErrItem{T: ItemErr, Code: ErrItemBadMessage, Msg: "m", Item: &item, Task: id, Ctx: id}, 13, []uint64{0, 1, 2, 3, 4, 5}},
 		{ConnUpdateItem{T: ItemConnUpdate, Conn: 2, Reason: "r"}, 14, []uint64{0, 1, 2}},
+		{ConnectionUpdateItem{T: ItemConnectionUpdate, Connections: []HelloConnection{{Channel: "c", Kind: KindReverseCall}}}, 31,
+			[]uint64{0, 1}},
 		{RehelloItem{T: ItemRehello}, 6, []uint64{0}},
 		{ResumeItem{T: ItemResume, Task: id, Ctx: id}, 15, []uint64{0, 1, 2}},
 		{PollItem{T: ItemPoll, Within: 1000}, 16, []uint64{0, 1}},

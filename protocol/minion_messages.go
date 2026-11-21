@@ -112,6 +112,9 @@ const (
 	// ItemPacked: an item deflated (PackedItem; both ways,
 	// compression.go).
 	ItemPacked = 30
+	// ItemConnectionUpdate: the minion's connections changed, the whole
+	// list again (ConnectionUpdateItem; minion → core).
+	ItemConnectionUpdate = 31
 )
 
 // itemNames are the item types' names, for people (logs, docs).
@@ -124,6 +127,7 @@ var itemNames = map[int]string{
 	ItemIdentity: "identity", ItemTunnel: "tunnel", ItemTunnelReply: "tunnel_reply", ItemTunnelData: "tunnel_data",
 	ItemTunnelAck: "tunnel_ack", ItemTunnelClose: "tunnel_close", ItemTunnelDatagram: "tunnel_datagram",
 	ItemTunnelListen: "tunnel_listen", ItemTunnelCtl: "tunnel_ctl", ItemDelegate: "delegate", ItemPacked: "packed",
+	ItemConnectionUpdate: "connection_update",
 }
 
 // ItemName is an item type's name, for people: "item 42" for one it does
@@ -258,13 +262,13 @@ func (c HelloConnection) Validate() error {
 	switch c.Kind {
 	case KindReverseCall, KindReversePersistent, KindBindCall, KindBindPersistent:
 	default:
-		return fmt.Errorf("hello: connection kind %q is not one", c.Kind)
+		return fmt.Errorf("connection kind %q is not one", c.Kind)
 	}
 	switch {
 	case c.Channel == "":
-		return errors.New("hello: a connection's channel is required")
+		return errors.New("a connection's channel is required")
 	case c.MaxMessage > MaxMinionMessageSize:
-		return fmt.Errorf("hello: a connection's max_message is %d at most", MaxMinionMessageSize)
+		return fmt.Errorf("a connection's max_message is %d at most", MaxMinionMessageSize)
 	}
 	return nil
 }
@@ -396,17 +400,8 @@ func (h HelloItem) Validate() error {
 	case len(h.Connections) > 0 && h.Conn > uint64(len(h.Connections)):
 		return errors.New("hello: conn is past its connections")
 	}
-	names := map[string]bool{}
-	for _, c := range h.Connections {
-		if err := c.Validate(); err != nil {
-			return err
-		}
-		if c.Name != "" {
-			if names[c.Name] {
-				return fmt.Errorf("hello: connection name %q twice", c.Name)
-			}
-			names[c.Name] = true
-		}
+	if err := validateConnections(h.Connections); err != nil {
+		return fmt.Errorf("hello: %w", err)
 	}
 	if h.Sleep != nil {
 		if err := h.Sleep.Validate(); err != nil {
@@ -417,6 +412,43 @@ func (h HelloItem) Validate() error {
 		if len(a) != net.IPv4len && len(a) != net.IPv6len {
 			return errors.New("hello: an address is 4 bytes or 16")
 		}
+	}
+	return nil
+}
+
+// validateConnections checks a list of a minion's connections: each one's
+// shape, and names unique.
+func validateConnections(conns []HelloConnection) error {
+	names := map[string]bool{}
+	for _, c := range conns {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if c.Name != "" {
+			if names[c.Name] {
+				return fmt.Errorf("connection name %q twice", c.Name)
+			}
+			names[c.Name] = true
+		}
+	}
+	return nil
+}
+
+// ConnectionUpdateItem says the minion's connections again, whenever they
+// change (minion → core), as a hello's Connections: core replaces the
+// session's with them. The connection in use keeps its place.
+type ConnectionUpdateItem struct {
+	T           int               `cbor:"0,keyasint"`
+	Connections []HelloConnection `cbor:"1,keyasint"`
+}
+
+// Validate checks the list: one connection at least, each as a hello's.
+func (u ConnectionUpdateItem) Validate() error {
+	if len(u.Connections) == 0 {
+		return errors.New("connection_update: connections are one at least")
+	}
+	if err := validateConnections(u.Connections); err != nil {
+		return fmt.Errorf("connection_update: %w", err)
 	}
 	return nil
 }

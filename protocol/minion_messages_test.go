@@ -503,3 +503,31 @@ func TestHelloConnections(t *testing.T) {
 		t.Errorf("no list: conn is the build's to check: %v", err)
 	}
 }
+
+func TestConnectionUpdate(t *testing.T) {
+	u := ConnectionUpdateItem{T: ItemConnectionUpdate, Connections: []HelloConnection{
+		{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "dns", Kind: KindReversePersistent}}}
+	if err := u.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := MarshalCBOR(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ConnectionUpdateItem
+	if err := UnmarshalCBOR(b, &back); err != nil || ItemType(b) != ItemConnectionUpdate || len(back.Connections) != 2 {
+		t.Fatalf("round trip: %v %+v", err, back)
+	}
+	if ItemName(ItemConnectionUpdate) != "connection_update" {
+		t.Error(ItemName(ItemConnectionUpdate))
+	}
+	for name, bad := range map[string][]HelloConnection{
+		"none":      nil,
+		"bad kind":  {{Channel: "http", Kind: "x"}},
+		"same name": {{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "dns", Kind: KindReverseCall, Name: "a"}},
+	} {
+		if (ConnectionUpdateItem{T: ItemConnectionUpdate, Connections: bad}).Validate() == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+}

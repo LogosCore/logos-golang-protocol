@@ -131,7 +131,7 @@ var itemTypes = map[int]reflect.Type{
 	ItemTunnelAck: reflect.TypeFor[TunnelAckItem](), ItemTunnelClose: reflect.TypeFor[TunnelCloseItem](),
 	ItemTunnelDatagram: reflect.TypeFor[TunnelDatagramItem](), ItemTunnelListen: reflect.TypeFor[TunnelListenItem](),
 	ItemTunnelCtl: reflect.TypeFor[TunnelCtlItem](), ItemDelegate: reflect.TypeFor[DelegateItem](),
-	ItemPacked: reflect.TypeFor[PackedItem](),
+	ItemPacked: reflect.TypeFor[PackedItem](), ItemConnectionUpdate: reflect.TypeFor[ConnectionUpdateItem](),
 }
 
 // A shape is what the protocol's types say of a value: how the JSON
