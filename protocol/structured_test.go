@@ -168,3 +168,80 @@ func TestStructuredDepthFitsAMessage(t *testing.T) {
 		t.Fatal("one level deeper decodes too: MaxStructuredDepth is below what a minion takes")
 	}
 }
+
+func TestStructuredConnection(t *testing.T) {
+	p := FieldSpec{Key: "conn", Num: 1, Type: FieldStructured, Format: FormatConnection, Required: true}
+	if err := checkCommandParam(p); err != nil {
+		t.Fatalf("a connection param refused: %v", err)
+	}
+	good := map[string]any{"channel": "http", "kind": KindReverseCall, "name": "front", "max_message": 4096,
+		"params": map[string]any{"url": "https://a.example"}, "values": map[string]any{"method": "PUT"},
+		"failover": map[string]any{"auto": false, "fail_after": 3}}
+	args, problems := TaskArgs([]FieldSpec{p}, map[string]any{"conn": good})
+	if problems != nil {
+		t.Fatalf("a good connection: %v", problems)
+	}
+	// Its shape, checked by TaskArgs.
+	for name, bad := range map[string]map[string]any{
+		"no channel":  {"kind": KindReverseCall},
+		"bad kind":    {"channel": "http", "kind": "pigeon"},
+		"bad name":    {"channel": "http", "kind": KindReverseCall, "name": "Front Door"},
+		"unknown key": {"channel": "http", "kind": KindReverseCall, "colour": "red"},
+		"big message": {"channel": "http", "kind": KindReverseCall, "max_message": MaxMinionMessageSize + 1},
+		"params list": {"channel": "http", "kind": KindReverseCall, "params": []any{"x"}},
+		"failover":    {"channel": "http", "kind": KindReverseCall, "failover": map[string]any{"fail_after": 0}},
+	} {
+		if _, problems := TaskArgs([]FieldSpec{p}, map[string]any{"conn": bad}); problems == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+
+	// The minion's form: by numbers, defaults filled in.
+	channel := []FieldSpec{
+		{Key: "url", Num: 1, Type: FieldURL, Required: true},
+		{Key: "timeout", Num: 2, Type: FieldDuration, Default: "30s"},
+		{Key: "login", Num: 3, Type: FieldCredential},
+	}
+	factory := []FieldSpec{{Key: "method", Num: 1, Type: FieldEnum, Default: "POST",
+		Options: []EnumOption{{Value: "POST"}, {Value: "PUT"}}}}
+	c, problems := ConnectionArg(args["conn"], channel, factory)
+	if problems != nil {
+		t.Fatal(problems)
+	}
+	if c.Channel != "http" || c.Kind != KindReverseCall || c.Name != "front" || c.MaxMessage != 4096 ||
+		c.Params[1] != "https://a.example" || c.Params[2] != uint64(30000) || c.Values[1] != "PUT" ||
+		c.Failover == nil || c.Failover.Auto == nil || *c.Failover.Auto || c.Failover.FailAfter != 3 {
+		t.Fatalf("connection %+v", c)
+	}
+	if err := (HelloConnection{Channel: c.Channel, Kind: c.Kind}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := MarshalCBOR(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back HelloConnection
+	if err := UnmarshalCBOR(b, &back); err != nil || back.Params[1] != "https://a.example" {
+		t.Fatalf("round trip: %v %+v", err, back)
+	}
+
+	// Refused by the fields: an unknown param, a missing required one, a
+	// credential, a bad value.
+	for name, conn := range map[string]map[string]any{
+		"unknown param": {"channel": "http", "kind": KindReverseCall, "params": map[string]any{"url": "https://a", "nope": 1}},
+		"missing url":   {"channel": "http", "kind": KindReverseCall},
+		"credential":    {"channel": "http", "kind": KindReverseCall, "params": map[string]any{"url": "https://a", "login": "c1"}},
+		"bad value":     {"channel": "http", "kind": KindReverseCall, "params": map[string]any{"url": "https://a"}, "values": map[string]any{"method": "GET"}},
+	} {
+		a, problems := TaskArgs([]FieldSpec{p}, map[string]any{"conn": conn})
+		if problems != nil {
+			t.Fatalf("%s: the shape refused: %v", name, problems)
+		}
+		if _, problems := ConnectionArg(a["conn"], channel, factory); problems == nil {
+			t.Errorf("%s: taken", name)
+		}
+	}
+	if fs := StructuredFormats(); len(fs) != 1 || fs[0] != FormatConnection {
+		t.Errorf("formats %v", fs)
+	}
+}

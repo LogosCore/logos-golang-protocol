@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,11 +32,12 @@ const (
 // against: "" (none) any JSON value, checked for size and depth alone. A
 // format adds its check here, and its row on the docs page.
 var structuredFormats = map[string]func(any) error{
-	"": nil,
+	"":               nil,
+	FormatConnection: checkConnectionValue,
 }
 
-// StructuredFormats are the formats a structured param may name, sorted:
-// none yet, besides no format.
+// StructuredFormats are the formats a structured param may name, sorted,
+// besides no format.
 func StructuredFormats() []string {
 	var out []string
 	for f := range structuredFormats {
@@ -224,4 +226,156 @@ func ArgStructured[K comparable](args map[K]any, key K, out any) (ok bool, err e
 		return true, err
 	}
 	return true, cborDec.Unmarshal(b, out)
+}
+
+// A structured value of FormatConnection is one connection, as a build's,
+// by names: {"channel", "kind", "name"?, "version"?, "params"?, "values"?,
+// "failover"?, "max_message"?}. Its shape is checked here (TaskArgs); core
+// checks it against the channel's fields and the factory's connection
+// parameters and puts the minion's numbered form in the arg's place
+// (ConnectionArg), as it puts a credential in place of its id.
+
+// connectionNamePattern is what a connection's name matches: a slug, as an
+// endpoint's.
+var connectionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
+
+// checkConnectionValue checks a connection value's shape, in its CBOR form
+// (structuredForm): an object of the keys FormatConnection names, a channel,
+// one of the connection kinds, a slug name, params and values objects, a
+// failover's auto and fail_after, a max_message within the protocol's.
+func checkConnectionValue(v any) error {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return fmt.Errorf("a connection is an object")
+	}
+	for k := range m {
+		switch k {
+		case "channel", "kind", "name", "version", "params", "values", "failover", "max_message":
+		default:
+			return fmt.Errorf("a connection has no %q", k)
+		}
+	}
+	if c, _ := m["channel"].(string); c == "" {
+		return fmt.Errorf("a connection's channel is required")
+	}
+	switch m["kind"] {
+	case KindReverseCall, KindReversePersistent, KindBindCall, KindBindPersistent:
+	default:
+		return fmt.Errorf("a connection's kind is one of %s, %s, %s, %s", KindReverseCall, KindReversePersistent, KindBindCall,
+			KindBindPersistent)
+	}
+	if n, ok := m["name"]; ok {
+		if s, _ := n.(string); !connectionNamePattern.MatchString(s) {
+			return fmt.Errorf("a connection's name matches %s", connectionNamePattern)
+		}
+	}
+	if n, ok := m["version"]; ok {
+		if i, ok := AsInt64(n); !ok || i < 0 {
+			return fmt.Errorf("a connection's version is a whole number")
+		}
+	}
+	for _, k := range []string{"params", "values"} {
+		if x, ok := m[k]; ok {
+			if _, ok := x.(map[string]any); !ok {
+				return fmt.Errorf("a connection's %s are an object, by key", k)
+			}
+		}
+	}
+	if x, ok := m["failover"]; ok {
+		f, ok := x.(map[string]any)
+		if !ok {
+			return fmt.Errorf("a connection's failover is an object")
+		}
+		for k, fv := range f {
+			switch k {
+			case "auto":
+				if _, ok := fv.(bool); !ok {
+					return fmt.Errorf("failover's auto is true or false")
+				}
+			case "fail_after":
+				if i, ok := AsInt64(fv); !ok || i < 1 {
+					return fmt.Errorf("failover's fail_after is 1 at least")
+				}
+			default:
+				return fmt.Errorf("a connection's failover has no %q", k)
+			}
+		}
+	}
+	if x, ok := m["max_message"]; ok {
+		if i, ok := AsInt64(x); !ok || i < 0 || i > MaxMinionMessageSize {
+			return fmt.Errorf("a connection's max_message is 0 to %d", MaxMinionMessageSize)
+		}
+	}
+	return nil
+}
+
+// ConnectionArg is a connection value (a FormatConnection param's arg, as
+// TaskArgs leaves it) as the minion gets it: its params checked against
+// channel's fields for its kind and its values against factory's
+// connection parameters for its channel and kind, defaults filled in, each
+// by its field's number in its type's CBOR form. Problems come by key
+// ("params.url"). A credential field takes no value here: a connection
+// handed to a minion carries none.
+func ConnectionArg(v any, channel, factory []FieldSpec) (HelloConnection, map[string]string) {
+	var c HelloConnection
+	if err := checkConnectionValue(v); err != nil {
+		return c, map[string]string{"": err.Error()}
+	}
+	m := v.(map[string]any)
+	c.Channel, _ = m["channel"].(string)
+	c.Kind, _ = m["kind"].(string)
+	c.Name, _ = m["name"].(string)
+	if n, ok := AsInt64(m["version"]); ok {
+		c.Version = uint64(n) //nolint:gosec // checked: not negative
+	}
+	if n, ok := AsInt64(m["max_message"]); ok {
+		c.MaxMessage = uint64(n) //nolint:gosec // checked: within the protocol's
+	}
+	if f, ok := m["failover"].(map[string]any); ok {
+		c.Failover = &HelloConnectionFailover{}
+		if a, ok := f["auto"].(bool); ok {
+			c.Failover.Auto = &a
+		}
+		if n, ok := AsInt64(f["fail_after"]); ok {
+			c.Failover.FailAfter = uint64(n) //nolint:gosec // checked: 1 at least
+		}
+	}
+	var problems map[string]string
+	numbered := func(what string, fields []FieldSpec) map[uint64]any {
+		values, _ := m[what].(map[string]any)
+		out, p := connectionValues(fields, values)
+		for k, r := range p {
+			problems = addProblem(problems, what+"."+k, r)
+		}
+		return out
+	}
+	c.Params, c.Values = numbered("params", channel), numbered("values", factory)
+	if problems != nil {
+		return HelloConnection{}, problems
+	}
+	return c, nil
+}
+
+// connectionValues are values checked against fields, over their defaults,
+// each in its type's CBOR form by its field's number; nil for none.
+func connectionValues(fields []FieldSpec, values map[string]any) (map[uint64]any, map[string]string) {
+	for _, f := range fields {
+		if isCredentialField(f.Type) && values[f.Key] != nil {
+			return nil, map[string]string{f.Key: "a connection handed to a minion carries no credentials"}
+		}
+	}
+	args, problems := TaskArgs(fields, values)
+	if problems != nil {
+		return nil, problems
+	}
+	var out map[uint64]any
+	for _, f := range fields {
+		if a, ok := args[f.Key]; ok && f.Num > 0 && !isCredentialField(f.Type) {
+			if out == nil {
+				out = map[uint64]any{}
+			}
+			out[uint64(f.Num)] = a //nolint:gosec // a field's num is 1 to MaxFieldNumber
+		}
+	}
+	return out, nil
 }

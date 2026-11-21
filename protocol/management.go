@@ -102,7 +102,9 @@ const (
 	FormatPath      = "path"       // a string: a URL path, e.g. /cdn/assets/
 	// FormatConnection is an int: one of a minion's build's connections, by
 	// its place from 1 (a command's param: switch_connection's conn). The UI
-	// offers the session's connections by name, kind and address.
+	// offers the session's connections by name, kind and address. For a
+	// structured param it is a connection itself (structured.go), checked
+	// by core and sent as the minion's numbered form (ConnectionArg).
 	FormatConnection = "connection"
 	// FormatMultiline is a string or a secret over several lines, a PEM
 	// key say: the UI edits it in a box of several lines, its line breaks
