@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -235,6 +236,8 @@ func TestResultDataWire(t *testing.T) {
 		ResultDirWalk:      DirWalk{Root: "/", Folders: 3, Entries: 40, Unread: 1, Current: "/usr"},
 		ResultVolumes: Volumes{Sep: "/", Volumes: []Volume{{Path: "/boot", Kind: VolumeFixed, Device: "/dev/sda1", Size: &[]uint64{1 << 30}[0],
 			X: map[string]any{"uuid": "e4"}}}},
+		ResultProcessList: &ProcessList{Sep: `\`, Processes: []Process{{PID: 4242, Name: "explorer.exe", Path: `C:\Windows\explorer.exe`,
+			Integrity: "medium", State: ProcessSleeping, X: map[string]any{"desktop": "Default"}}}},
 	} {
 		wire, err := WireResultData(v)
 		if err != nil {
@@ -273,6 +276,11 @@ func TestResultDataWire(t *testing.T) {
 			if v, err := ReadVolumes(0, named); err != nil || len(v.Volumes) != 1 || v.Volumes[0].Device != "/dev/sda1" ||
 				*v.Volumes[0].Size != 1<<30 || v.Volumes[0].X["uuid"] != "e4" {
 				t.Errorf("volumes: %+v %v", v, err)
+			}
+		case ResultProcessList:
+			if l, err := ReadProcessList(0, named); err != nil || len(l.Processes) != 1 || l.Processes[0].PID != 4242 ||
+				l.Processes[0].Integrity != "medium" || l.Processes[0].State != ProcessSleeping || l.Processes[0].X["desktop"] != "Default" {
+				t.Errorf("process list: %+v %v", l, err)
 			}
 		}
 	}
@@ -359,6 +367,54 @@ func TestPollErrCtx(t *testing.T) {
 		}
 		if got := string(ItemCtx(b)); got != c.want {
 			t.Errorf("%T: ctx %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
+// A process_list's numbers, as they travel: sep 1, processes 2, x 3; a
+// process's pid 1 to x 15, its integrity by the hello's levels and its state
+// by its own (running 1 to zombie 5); a number this version does not know
+// reads by its number. A process without a pid does not read, and neither
+// does a name a level or a state does not have.
+func TestProcessListWire(t *testing.T) {
+	wire, err := MarshalCBOR(map[int]any{1: "/", 3: map[string]any{"ns": "host"}, 2: []any{
+		map[int]any{1: uint64(812), 2: uint64(1), 3: "sshd", 4: "/usr/sbin/sshd", 5: "sshd: /usr/sbin/sshd -D", 6: "root",
+			7: int64(1793347920), 8: uint64(3), 9: uint64(IntegrityRoot), 10: "amd64", 11: uint64(4), 12: uint64(6 << 20),
+			13: uint64(1500), 14: uint64(2), 15: map[string]any{"cgroup": "/system.slice/ssh.service"}},
+		map[int]any{1: uint64(0), 3: "swapper", 9: uint64(9), 14: uint64(7)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	named, err := NamedResultData(ResultProcessList, wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := ReadProcessList(0, named)
+	if err != nil || l.Sep != "/" || l.X["ns"] != "host" || len(l.Processes) != 2 {
+		t.Fatalf("read %+v %v", l, err)
+	}
+	p := l.Processes[0]
+	if p.PID != 812 || *p.PPID != 1 || p.Name != "sshd" || p.Path != "/usr/sbin/sshd" || p.Cmdline != "sshd: /usr/sbin/sshd -D" ||
+		p.User != "root" || *p.Started != 1793347920 || *p.Session != 3 || p.Integrity != "root" || p.Arch != "amd64" || *p.Threads != 4 ||
+		*p.Memory != 6<<20 || *p.CPUTime != 1500 || p.State != ProcessSleeping || p.X["cgroup"] != "/system.slice/ssh.service" {
+		t.Fatalf("process %+v", p)
+	}
+	if q := l.Processes[1]; q.PID != 0 || q.Integrity != "level 9" || q.State != "state 7" || q.PPID != nil {
+		t.Fatalf("numbers this version does not know %+v", q)
+	}
+	for n, name := range []string{1: "running", 2: "sleeping", 3: "waiting", 4: "stopped", 5: "zombie"} {
+		if n > 0 && ProcessStateName(uint64(n)) != name {
+			t.Errorf("state %d: %q, want %q", n, ProcessStateName(uint64(n)), name)
+		}
+	}
+	noPID, _ := MarshalCBOR(map[int]any{1: "/", 2: []any{map[int]any{3: "orphan"}}})
+	if _, err := NamedResultData(ResultProcessList, noPID); err == nil || !strings.Contains(err.Error(), "no pid") {
+		t.Fatalf("a process without a pid: %v", err)
+	}
+	for _, bad := range []Process{{PID: 1, Name: "a", Integrity: "admin"}, {PID: 1, Name: "a", State: "busy"}} {
+		if _, err := WireResultData(ProcessList{Sep: "/", Processes: []Process{bad}}); err == nil {
+			t.Errorf("%+v went on the wire", bad)
 		}
 	}
 }

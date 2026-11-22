@@ -43,6 +43,9 @@ const (
 	// minion sends it as a file with a name and no path, core keeps it as a
 	// download's, and the data says which picture.
 	ResultScreenshot = "screenshot"
+	// ResultProcessList is the host's processes (ProcessList): those the
+	// minion sees, each with what it could read of it.
+	ResultProcessList = "process_list"
 )
 
 // Actions.
@@ -75,6 +78,20 @@ const (
 	// command's result is a ResultVolumes. The file browser runs it for a
 	// machine's roots (a Windows host's drives).
 	ActionListVolumes = "list_volumes"
+	// ActionListProcesses lists the host's processes: core gives nothing; the
+	// command's result is a ResultProcessList. A process list's Refresh runs
+	// it.
+	ActionListProcesses = "list_processes"
+	// ActionKillProcess ends a process on the host: core gives pid; started,
+	// when it started (unix seconds, as the list said it; 0 when the list did
+	// not say); and force. Pids are reused: the minion ends the process only
+	// if the one with that pid started then (to the second), and fails the
+	// task otherwise; given 0, it ends whatever has the pid. Without force it
+	// asks the process to end where the host has a way every process gets
+	// (SIGTERM); with it, it ends it at once (SIGKILL, TerminateProcess).
+	// Asked to end its own process, the minion sends the task's done part
+	// first. No result: the task's output says what it did.
+	ActionKillProcess = "kill_process"
 	// ActionSwitchConnection moves the minion to another of its build's
 	// connections: core gives conn, its place in the build's connections,
 	// from 1 (a param of FormatConnection, so the UI offers them by name). It has no result: the task's output says how it went, and a
@@ -442,6 +459,7 @@ var results = map[string]bool{
 	ResultDirWalk:      true,
 	ResultVolumes:      true,
 	ResultScreenshot:   true,
+	ResultProcessList:  true,
 }
 
 // CommandAction is an action's contract: the params core gives when it runs a
@@ -486,6 +504,8 @@ var actions = map[string]CommandAction{
 	ActionDeletePath:       {Params: map[string]FieldType{"path": FieldString, "recursive": FieldBool}},
 	ActionWalkDir:          {Params: map[string]FieldType{"path": FieldString}, Result: ResultDirWalk},
 	ActionListVolumes:      {Result: ResultVolumes},
+	ActionListProcesses:    {Result: ResultProcessList},
+	ActionKillProcess:      {Params: map[string]FieldType{"pid": FieldInt, "started": FieldInt, "force": FieldBool}},
 	ActionSwitchConnection: {Params: map[string]FieldType{"conn": FieldInt}},
 	ActionEditConnection:   {Params: map[string]FieldType{"conn": FieldInt, "connection": FieldStructured}},
 	ActionAddConnection:    {Params: map[string]FieldType{"connection": FieldStructured}},

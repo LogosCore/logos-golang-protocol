@@ -75,6 +75,71 @@ type volumeWire struct {
 	X        map[string]any `cbor:"10,keyasint,omitempty"`
 }
 
+type processListWire struct {
+	Sep       string         `cbor:"1,keyasint"`
+	Processes []processWire  `cbor:"2,keyasint,omitempty"`
+	X         map[string]any `cbor:"3,keyasint,omitempty"`
+}
+
+// processWire is a process as it travels: its integrity and its state by
+// number (the hello's levels; ProcessRunning 1, ...), its pid a pointer so
+// one that came without is told from pid 0.
+type processWire struct {
+	PID       *uint64        `cbor:"1,keyasint"`
+	PPID      *uint64        `cbor:"2,keyasint,omitempty"`
+	Name      string         `cbor:"3,keyasint"`
+	Path      string         `cbor:"4,keyasint,omitempty"`
+	Cmdline   string         `cbor:"5,keyasint,omitempty"`
+	User      string         `cbor:"6,keyasint,omitempty"`
+	Started   *int64         `cbor:"7,keyasint,omitempty"`
+	Session   *uint64        `cbor:"8,keyasint,omitempty"`
+	Integrity uint64         `cbor:"9,keyasint,omitempty"`
+	Arch      string         `cbor:"10,keyasint,omitempty"`
+	Threads   *uint64        `cbor:"11,keyasint,omitempty"`
+	Memory    *uint64        `cbor:"12,keyasint,omitempty"`
+	CPUTime   *uint64        `cbor:"13,keyasint,omitempty"`
+	State     uint64         `cbor:"14,keyasint,omitempty"`
+	X         map[string]any `cbor:"15,keyasint,omitempty"`
+}
+
+func (l ProcessList) wire() (processListWire, error) {
+	w := processListWire{Sep: l.Sep, X: l.X}
+	for i, p := range l.Processes {
+		pid := p.PID
+		pw := processWire{PID: &pid, PPID: p.PPID, Name: p.Name, Path: p.Path, Cmdline: p.Cmdline, User: p.User, Started: p.Started,
+			Session: p.Session, Arch: p.Arch, Threads: p.Threads, Memory: p.Memory, CPUTime: p.CPUTime, X: p.X}
+		if p.Integrity != "" {
+			n, ok := integrityNumber(p.Integrity)
+			if !ok {
+				return w, fmt.Errorf("process_list: process %d (pid %d): integrity %q is not a level", i, p.PID, p.Integrity)
+			}
+			pw.Integrity = n
+		}
+		if p.State != "" {
+			n, ok := processStateNumber(p.State)
+			if !ok {
+				return w, fmt.Errorf("process_list: process %d (pid %d): state %q is not one", i, p.PID, p.State)
+			}
+			pw.State = n
+		}
+		w.Processes = append(w.Processes, pw)
+	}
+	return w, nil
+}
+
+func (w processListWire) named() (ProcessList, error) {
+	l := ProcessList{Sep: w.Sep, X: w.X}
+	for i, p := range w.Processes {
+		if p.PID == nil {
+			return l, fmt.Errorf("process %d (%q): no pid", i, p.Name)
+		}
+		l.Processes = append(l.Processes, Process{PID: *p.PID, PPID: p.PPID, Name: p.Name, Path: p.Path, Cmdline: p.Cmdline, User: p.User,
+			Started: p.Started, Session: p.Session, Integrity: IntegrityName(int(p.Integrity)), Arch: p.Arch, Threads: p.Threads,
+			Memory: p.Memory, CPUTime: p.CPUTime, State: ProcessStateName(p.State), X: p.X})
+	}
+	return l, nil
+}
+
 func (v Volumes) wire() volumesWire {
 	w := volumesWire{Sep: v.Sep, X: v.X}
 	for _, vol := range v.Volumes {
@@ -92,10 +157,23 @@ func (w volumesWire) named() Volumes {
 }
 
 // WireResultData encodes a result part's data as it travels: a
-// FileDownload, FileUpload, FileStream, Screenshot, DirWalk or Volumes
-// numbered, anything else (a factory's own shape) as ResultData does.
+// FileDownload, FileUpload, FileStream, Screenshot, DirWalk, Volumes or
+// ProcessList numbered, anything else (a factory's own shape) as ResultData
+// does.
 func WireResultData(v any) (cbor.RawMessage, error) {
 	switch d := v.(type) {
+	case ProcessList:
+		w, err := d.wire()
+		if err != nil {
+			return nil, err
+		}
+		v = w
+	case *ProcessList:
+		w, err := d.wire()
+		if err != nil {
+			return nil, err
+		}
+		v = w
 	case FileDownload:
 		v = fileDownloadWire(d)
 	case *FileDownload:
@@ -158,6 +236,11 @@ func NamedResultData(result string, data cbor.RawMessage) (cbor.RawMessage, erro
 		var w volumesWire
 		err = cborDec.Unmarshal(data, &w)
 		named = w.named()
+	case ResultProcessList:
+		var w processListWire
+		if err = cborDec.Unmarshal(data, &w); err == nil {
+			named, err = w.named()
+		}
 	default:
 		return data, nil
 	}

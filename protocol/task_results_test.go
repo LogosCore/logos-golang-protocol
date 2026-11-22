@@ -27,8 +27,8 @@ func TestCommandResultsAndActions(t *testing.T) {
 		c    BuildCommand
 		want string
 	}{
-		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, screenshot, volumes)`},
-		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (add_connection, delegate, delete_path, download_file, edit_connection, list_dir, list_volumes, remove_connection, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
+		"unknown result":    {BuildCommand{ID: "ls", Result: "dir_listng"}, `result "dir_listng" is not one core knows (dir_listing, dir_walk, file_download, file_stream, file_upload, process_list, screenshot, volumes)`},
+		"unknown action":    {BuildCommand{ID: "ls", Action: "list"}, `action "list" is not one core knows (add_connection, delegate, delete_path, download_file, edit_connection, kill_process, list_dir, list_processes, list_volumes, remove_connection, reverse_delegate, reverse_tunnel, stream_file, switch_connection, tunnel, upload_file, upload_stream, walk_dir)`},
 		"no path":           {listDir(), `action "list_dir" takes a string param "path"`},
 		"path not a string": {listDir(FieldSpec{Key: "path", Type: FieldInt}), `takes a string param "path"`},
 		"more, no default":  {listDir(path, FieldSpec{Key: "all", Type: FieldBool}), `param "all" needs a default`},
@@ -121,7 +121,7 @@ func TestCommandResultsAndActions(t *testing.T) {
 	if err := validateBuildCommand(removeConn, nil); err == nil {
 		t.Error("remove_connection with a text conn: taken")
 	}
-	if !KnownResult(ResultDirListing) || KnownResult("process_list") {
+	if !KnownResult(ResultDirListing) || KnownResult("registry_keys") {
 		t.Error("KnownResult")
 	}
 	if a, ok := KnownAction(ActionListDir); !ok || a.Result != ResultDirListing || a.Params["path"] != FieldString {
@@ -304,5 +304,66 @@ func TestVolumes(t *testing.T) {
 	c.Result = ResultDirListing
 	if err := validateResultAction(c); err == nil || !strings.Contains(err.Error(), `needs result "volumes"`) {
 		t.Fatalf("a list_volumes command without its result: %v", err)
+	}
+}
+
+// A process_list part: its separator, and each process a name, its path
+// absolute on the host when it has one; list_processes takes nothing and
+// needs the result; kill_process takes pid, started and force, and has
+// none.
+func TestProcessList(t *testing.T) {
+	ppid, started, mem := uint64(1), int64(1793347920), uint64(48<<20)
+	for _, ok := range []ProcessList{
+		{Sep: "/", Processes: []Process{{PID: 1, Name: "systemd", Path: "/usr/lib/systemd/systemd", User: "root", Integrity: "root"},
+			{PID: 812, PPID: &ppid, Name: "sshd", Cmdline: "sshd: /usr/sbin/sshd -D", Started: &started, Memory: &mem, State: ProcessSleeping},
+			{PID: 2, Name: "kthreadd"}}},
+		{Sep: `\`, Processes: []Process{{PID: 0, Name: "System Idle Process"},
+			{PID: 4242, Name: "explorer.exe", Path: `C:\Windows\explorer.exe`, User: `CORP\ann`, Integrity: "medium", Arch: "amd64"},
+			{PID: 77, Name: "app.exe", Path: `\\nas\tools\app.exe`}}},
+		{Sep: "/"},
+	} {
+		data, err := ResultData(ok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := ReadProcessList(0, data)
+		if err != nil || len(l.Processes) != len(ok.Processes) {
+			t.Fatalf("%+v: %+v %v", ok, l, err)
+		}
+	}
+	for name, bad := range map[string]ProcessList{
+		"sep":         {Sep: "", Processes: []Process{{PID: 1, Name: "init"}}},
+		"no name":     {Sep: "/", Processes: []Process{{PID: 1}}},
+		"relative":    {Sep: "/", Processes: []Process{{PID: 1, Name: "a", Path: "bin/a"}}},
+		"unix on win": {Sep: `\`, Processes: []Process{{PID: 1, Name: "a", Path: "/usr/bin/a"}}},
+	} {
+		data, _ := ResultData(bad)
+		if _, err := ReadProcessList(0, data); err == nil {
+			t.Errorf("%s passed", name)
+		}
+	}
+	if a, ok := KnownAction(ActionListProcesses); !ok || a.Result != ResultProcessList || len(a.Params) != 0 || !KnownResult(ResultProcessList) {
+		t.Fatalf("list_processes: %+v", a)
+	}
+	a, ok := KnownAction(ActionKillProcess)
+	if !ok || a.Result != "" || len(a.Params) != 3 || a.Params["pid"] != FieldInt || a.Params["started"] != FieldInt || a.Params["force"] != FieldBool {
+		t.Fatalf("kill_process: %+v", a)
+	}
+	kill := BuildCommand{ID: "kill", Action: ActionKillProcess, Params: []FieldSpec{{Key: "pid", Type: FieldInt, Required: true},
+		{Key: "started", Type: FieldInt}, {Key: "force", Type: FieldBool}, {Key: "wait", Type: FieldDuration, Default: "2s"}}}
+	if err := validateResultAction(kill); err != nil {
+		t.Fatal(err)
+	}
+	kill.Params[1].Type = FieldDatetime
+	if err := validateResultAction(kill); err == nil || !strings.Contains(err.Error(), `takes a int param "started"`) {
+		t.Fatalf("a kill_process whose started is not an int: %v", err)
+	}
+	kill.Params[1].Type, kill.Result = FieldInt, ResultProcessList
+	if err := validateResultAction(kill); err == nil || !strings.Contains(err.Error(), "has no result") {
+		t.Fatalf("a kill_process command with a result: %v", err)
+	}
+	if err := validateResultAction(BuildCommand{ID: "ps", Action: ActionListProcesses, Result: ResultVolumes}); err == nil ||
+		!strings.Contains(err.Error(), `needs result "process_list"`) {
+		t.Fatalf("a list_processes command without its result: %v", err)
 	}
 }
