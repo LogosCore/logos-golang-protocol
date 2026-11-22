@@ -95,6 +95,10 @@ type BuildSchema struct {
 	// from those of its target, and the minion has only those. Optional: a
 	// factory without commands builds minions with none.
 	Commands []BuildCommand `json:"commands,omitempty"`
+	// FactoryCommands are commands the factory runs itself, never a minion
+	// (factory_command.go): every session of its builds has them, minions
+	// already deployed among them, and no build picks one. Optional.
+	FactoryCommands []FactoryCommand `json:"factory_commands,omitempty"`
 	// ErrorCodes are the factory's own: what a minion's exit code means when
 	// it stops on an error (a config it cannot read, no connection it can
 	// use), for an operator to look up (error_codes.go). Optional; core
@@ -656,6 +660,9 @@ func ValidateBuildSchema(s BuildSchema) error {
 		ops[c.Op] = c.ID
 	}
 	if err := validateComposites(s); err != nil {
+		return err
+	}
+	if err := validateFactoryCommands(s); err != nil {
 		return err
 	}
 	return validateErrorCodes(s)

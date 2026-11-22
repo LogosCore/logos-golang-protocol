@@ -31,8 +31,10 @@ const (
 )
 
 // CodeBusy is the factory.build error of an instance that already runs as
-// many builds as it can, and the factory.compose one of an instance with as
-// many decisions at once as it takes; core tries another instance.
+// many builds as it can, the factory.compose one of an instance with as many
+// decisions at once as it takes, and the factory.command one of an instance
+// that runs as many factory commands' tasks as it takes; core tries another
+// instance.
 const CodeBusy = "busy"
 
 // ChannelEndpointExportV2 is the format of a channel endpoint export: a
