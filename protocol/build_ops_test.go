@@ -29,7 +29,7 @@ const (
       "endpoint": {
         "format": "logos.channel-endpoint.v2",
         "name": "edge-eu",
-        "channel": { "module_name": "http", "schema_version": 2 },
+        "channel": { "module_name": "http", "schema_version": 3 },
         "kind": "reverse-call",
         "params": { "base_url": "https://edge-eu.example.com", "tls_verify": false, "request_timeout": "40s" }
       },
@@ -41,12 +41,12 @@ const (
       "id": "0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55", "name": "app.ico", "size": 4286,
       "sha256": "9f2c41d0e5a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2",
       "media_type": "image/x-icon",
-      "url": "/api/factory/builds/5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f/files/0f9a2c1e-6f1b-4a43-9d4e-2b9b3c1d7e55?expires=1793025060&sig=…"
+      "url": "/api/factory/builds/5b0c4f6e-…/files/0f9a2c1e-…?expires=1793025060&sig=…"
     }
   },
-  "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "…": "…" } },
+  "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "enc_key": "<base64, 32 bytes>", "mac_key": "<base64, 32 bytes>" } },
   "error_codes": [{ "code": 3, "exit_code": 87 }, { "code": 4, "exit_code": 201 }],
-  "artifact": { "upload_url": "/api/factory/builds/5b0c4f6e-8a1d-4c2b-9e7f-3d2a1b0c9e8f/artifact?expires=1793025060&sig=…", "max_size": 268435456 },
+  "artifact": { "upload_url": "/api/factory/builds/5b0c4f6e-…/artifact?expires=1793025060&sig=…", "max_size": 268435456 },
   "deadline": "2026-10-26T14:30:00Z",
   "actor": { "type": "user", "id": "f140266c-…", "name": "admin" }
 }`
@@ -162,7 +162,7 @@ func TestValidateBuildRequest_Problems(t *testing.T) {
 		{"connections", func(r *BuildRequest) { r.Connections = nil }},
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Format = "logos.channel-endpoint.v1" }},
 		{"connections[0].kind", func(r *BuildRequest) { r.Connections[0].Endpoint.Kind = KindBindCall }},
-		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.SchemaVersion = 3 }},
+		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.SchemaVersion = 4 }},
 		{"connections[0]", func(r *BuildRequest) { r.Connections[0].Endpoint.Channel.ModuleName = "smtp" }},
 		{"connections[0].values.method", func(r *BuildRequest) { r.Connections[0].Values["method"] = "PATCH" }},
 		{"connections[0].values.color", func(r *BuildRequest) { r.Connections[0].Values["color"] = "red" }},

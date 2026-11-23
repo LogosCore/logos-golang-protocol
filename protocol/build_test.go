@@ -15,7 +15,7 @@ const docBuildSchema = `{
   "version": 1,
   "channels": [
     {
-      "module_name": "http", "num": 1, "versions": [2],
+      "module_name": "http", "num": 1, "versions": [3],
       "kinds": [
         {
           "kind": "reverse-call",
@@ -36,6 +36,7 @@ const docBuildSchema = `{
           "fields": [
             {
               "key": "path_prefix", "num": 2, "type": "string", "label": "Path prefix", "default": "/",
+              "description": "The WebSocket's path starts with it.",
               "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$", "max_length": 256
             }
           ]
@@ -86,7 +87,7 @@ const docBuildSchema = `{
     {
       "id": "shellcode", "label": "Shellcode", "format": "bin",
       "platforms": ["windows/amd64", "linux/amd64"],
-      "channels": [{ "module_name": "http", "versions": [2] }]
+      "channels": [{ "module_name": "http", "versions": [3], "kinds": ["reverse-call"] }]
     }
   ],
   "commands": [
@@ -142,7 +143,7 @@ func TestBuildSchemaDocExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	if http, ok := s.Channel("http"); !ok || len(http.KindFields(KindReverseCall)) != 2 || len(http.KindFields(KindReversePersistent)) != 1 ||
-		!reflect.DeepEqual(http.Versions, []int{2}) {
+		!reflect.DeepEqual(http.Versions, []int{3}) {
 		t.Fatalf("http channel not decoded: %+v", http)
 	}
 	if want := []ErrorCode{
@@ -190,11 +191,11 @@ func TestBuildSchemaTargets(t *testing.T) {
 		version int
 		want    bool
 	}{
-		{elf, "http", 2, true},
+		{elf, "http", 3, true},
 		{elf, "dns", 1, true},
-		{elf, "http", 3, false}, // a version the factory does not list
+		{elf, "http", 4, false}, // a version the factory does not list
 		{elf, "smtp", 1, false},
-		{shellcode, "http", 2, true},
+		{shellcode, "http", 3, true},
 		{shellcode, "dns", 1, false}, // narrowed away
 	} {
 		if got := s.Supports(c.t, c.channel, c.version); got != c.want {
@@ -312,8 +313,8 @@ func TestValidateBuildSchema_Invalid(t *testing.T) {
 		{`channel "smtp" is not one the factory lists`, func(s *BuildSchema) {
 			s.Targets[3].Channels = []ChannelVersions{{ModuleName: "smtp", Versions: []int{1}}}
 		}},
-		{`channel "http": version 3 is not one the factory lists`, func(s *BuildSchema) {
-			s.Targets[3].Channels = []ChannelVersions{{ModuleName: "http", Versions: []int{3}}}
+		{`channel "http": version 4 is not one the factory lists`, func(s *BuildSchema) {
+			s.Targets[3].Channels = []ChannelVersions{{ModuleName: "http", Versions: []int{4}}}
 		}},
 		{`target "shellcode": duplicate channel "http"`, func(s *BuildSchema) {
 			s.Targets[3].Channels = append(s.Targets[3].Channels, s.Targets[3].Channels[0])

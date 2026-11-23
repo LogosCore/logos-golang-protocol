@@ -17,7 +17,7 @@ func TestBuildKinds(t *testing.T) {
 	}
 	// A target narrows them, to kinds the factory lists only.
 	at := slices.IndexFunc(s.Targets, func(t BuildTarget) bool { return t.ID == "linux-elf" })
-	s.Targets[at].Channels = []ChannelVersions{{ModuleName: "http", Versions: []int{2}, Kinds: []string{KindReversePersistent}}}
+	s.Targets[at].Channels = []ChannelVersions{{ModuleName: "http", Versions: []int{3}, Kinds: []string{KindReversePersistent}}}
 	if err := ValidateBuildSchema(s); err != nil {
 		t.Fatal(err)
 	}
