@@ -191,10 +191,17 @@ type FieldSpec struct {
 // platform: always without Platforms, else when one of them matches it,
 // half by half, "any" matching either.
 func (f FieldSpec) OnPlatform(platform string) bool {
-	if len(f.Platforms) == 0 {
+	return onPlatforms(f.Platforms, platform)
+}
+
+// onPlatforms reports whether something for patterns (a build field's or a
+// command's Platforms) applies to a build for platform: always without
+// patterns, else when one of them matches it.
+func onPlatforms(patterns []string, platform string) bool {
+	if len(patterns) == 0 {
 		return true
 	}
-	return slices.ContainsFunc(f.Platforms, func(p string) bool { return platformMatches(p, platform) })
+	return slices.ContainsFunc(patterns, func(p string) bool { return platformMatches(p, platform) })
 }
 
 // platformMatches reports whether pattern ("os/arch", either half "any")

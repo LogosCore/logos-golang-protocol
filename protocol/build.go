@@ -262,6 +262,14 @@ type BuildCommand struct {
 	Description string `json:"description,omitempty"`
 	// Targets narrows the command to these targets; empty means all of them.
 	Targets []string `json:"targets,omitempty"`
+	// Platforms narrows the command to builds for these platforms, "os/arch"
+	// as a target's, where "any" stands for either half (windows/any: every
+	// Windows build); empty: every platform of its targets. Each names a
+	// platform its targets build for, as a build field's (FieldSpec.Platforms;
+	// docs: contracts/minion-build.md, Commands for some platforms). A build
+	// for another platform has no such command (PlatformCommands): its
+	// default and required ones hold where it applies alone.
+	Platforms []string `json:"platforms,omitempty"`
 	// Default commands are picked in a new build until the operator unpicks
 	// them, and a build that names no commands gets them.
 	Default bool `json:"default,omitempty"`
@@ -352,6 +360,13 @@ func (s BuildSchema) CommandOpens(c BuildCommand, target string) []string {
 // For reports whether a build of target id can have the command.
 func (c BuildCommand) For(id string) bool {
 	return len(c.Targets) == 0 || slices.Contains(c.Targets, id)
+}
+
+// OnPlatform reports whether a build for platform can have the command:
+// always without Platforms, else when one of them matches it, half by half,
+// "any" matching either, as a build field's (FieldSpec.OnPlatform).
+func (c BuildCommand) OnPlatform(platform string) bool {
+	return onPlatforms(c.Platforms, platform)
 }
 
 // OverKind reports whether a task of the command can go to a minion on a
@@ -481,12 +496,25 @@ func (s BuildSchema) Command(id string) (BuildCommand, bool) {
 	return BuildCommand{}, false
 }
 
-// TargetCommands returns the commands a build of t can have, in the schema's
-// order.
+// TargetCommands returns the commands a build of t can have on one of its
+// platforms or another, in the schema's order; PlatformCommands, those of
+// one platform.
 func (s BuildSchema) TargetCommands(t BuildTarget) []BuildCommand {
 	var out []BuildCommand
 	for _, c := range s.Commands {
 		if c.For(t.ID) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// PlatformCommands returns the commands a build of t for platform can have,
+// in the schema's order: t's that apply there (BuildCommand.OnPlatform).
+func (s BuildSchema) PlatformCommands(t BuildTarget, platform string) []BuildCommand {
+	var out []BuildCommand
+	for _, c := range s.TargetCommands(t) {
+		if c.OnPlatform(platform) {
 			out = append(out, c)
 		}
 	}
@@ -503,11 +531,12 @@ func (c BuildCommand) ServedAction() string {
 	return c.Action
 }
 
-// DefaultCommands returns the ids of the commands a build of t gets when it
-// names none: its default and required ones, in the schema's order.
-func (s BuildSchema) DefaultCommands(t BuildTarget) []string {
+// DefaultCommands returns the ids of the commands a build of t for platform
+// gets when it names none: the default and required ones of its target and
+// platform, in the schema's order.
+func (s BuildSchema) DefaultCommands(t BuildTarget, platform string) []string {
 	out := []string{}
-	for _, c := range s.TargetCommands(t) {
+	for _, c := range s.PlatformCommands(t, platform) {
 		if c.Default || c.Required {
 			out = append(out, c.ID)
 		}
@@ -637,6 +666,9 @@ func ValidateBuildSchema(s BuildSchema) error {
 	}
 	for _, c := range s.Commands {
 		if err := validateBuildCommand(c, ids); err != nil {
+			return fmt.Errorf("command %q: %w", c.ID, err)
+		}
+		if err := checkCommandPlatforms(c, s.Targets); err != nil {
 			return fmt.Errorf("command %q: %w", c.ID, err)
 		}
 		for _, k := range c.Kinds {
@@ -921,6 +953,25 @@ func checkFieldPlatforms(field, platforms []string) error {
 		if !slices.ContainsFunc(platforms, func(b string) bool { return platformMatches(p, b) }) {
 			return fmt.Errorf("platform %q matches none its builds can be for (%s)", p, strings.Join(platforms, ", "))
 		}
+	}
+	return nil
+}
+
+// checkCommandPlatforms checks a command's Platforms against the platforms
+// its targets build for (every target's, when it names none), as a build
+// field's are checked (checkFieldPlatforms): each matches one of them.
+func checkCommandPlatforms(c BuildCommand, targets []BuildTarget) error {
+	if len(c.Platforms) == 0 {
+		return nil
+	}
+	var platforms []string
+	for _, t := range targets {
+		if c.For(t.ID) {
+			platforms = append(platforms, t.Platforms...)
+		}
+	}
+	if err := checkFieldPlatforms(c.Platforms, platforms); err != nil {
+		return fmt.Errorf("platforms: %w", err)
 	}
 	return nil
 }

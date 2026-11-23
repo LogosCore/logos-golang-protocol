@@ -295,15 +295,15 @@ func TestPickAndSessionCommands(t *testing.T) {
 	// What a composite uses comes with it, and what that uses: the
 	// required ones too, in the schema's order; one with no op builds
 	// nothing.
-	build := s.PickCommands(exe, []string{"sweep", "backup"})
+	build := s.PickCommands(exe, "windows/amd64", []string{"sweep", "backup"})
 	if want := []string{"sleep", "exit", "download", "ls", "rm", "archive", "sweep"}; !reflect.DeepEqual(build, want) {
 		t.Fatalf("picked %v, want %v", build, want)
 	}
-	if got, want := s.SessionCommands(exe, build), []string{"sleep", "exit", "download", "ls", "rm", "archive", "backup", "sweep"}; !reflect.DeepEqual(got, want) {
+	if got, want := s.SessionCommands(exe, "windows/amd64", build), []string{"sleep", "exit", "download", "ls", "rm", "archive", "backup", "sweep"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("session has %v, want %v", got, want)
 	}
 	// A session whose build lacks what it uses has no composite with no op.
-	if got, want := s.SessionCommands(exe, []string{"sleep", "exit", "download"}), []string{"sleep", "exit", "download"}; !reflect.DeepEqual(got, want) {
+	if got, want := s.SessionCommands(exe, "windows/amd64", []string{"sleep", "exit", "download"}), []string{"sleep", "exit", "download"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("session has %v, want %v", got, want)
 	}
 	// And the builds the picks make are ones a factory takes.

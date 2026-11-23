@@ -425,7 +425,7 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 		for k, reason := range s.OffPlatformValues(t, r.Platform, r.Values) {
 			add("values."+k, "%s", reason)
 		}
-		for key, reason := range checkCommands(s, t, r.Commands) {
+		for key, reason := range checkCommands(s, t, r.Platform, r.Commands) {
 			add(key, "%s", reason)
 		}
 
@@ -510,11 +510,12 @@ func ValidateBuildRequest(s BuildSchema, r BuildRequest) map[string]string {
 	return problems
 }
 
-// checkCommands checks a build's commands for target t: each one of the
-// target's with an op of its own, listed once, with what each composite
-// among them uses and every required one. Problems are keyed
-// "commands[<i>]", and "commands" for the required ones missing.
-func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]string {
+// checkCommands checks a build's commands for target t and platform: each
+// one of the target's, on the platform, with an op of its own, listed once,
+// with what each composite among them uses and every required one of the
+// target and platform. Problems are keyed "commands[<i>]", and "commands"
+// for the required ones missing.
+func checkCommands(s BuildSchema, t BuildTarget, platform string, commands []string) map[string]string {
 	problems := map[string]string{}
 	listed := make(map[string]bool, len(commands))
 	for _, id := range commands {
@@ -528,6 +529,8 @@ func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]s
 			problems[key] = fmt.Sprintf("%q is not a command of this factory", id)
 		case !c.For(t.ID):
 			problems[key] = fmt.Sprintf("%q is not a command of target %q", id, t.ID)
+		case !c.OnPlatform(platform):
+			problems[key] = fmt.Sprintf("%q is only for %s", id, strings.Join(c.Platforms, ", "))
 		case c.Legacy:
 			problems[key] = fmt.Sprintf("%q is legacy: only the builds that have it keep it", id)
 		case slices.Contains(commands[:i], id):
@@ -547,7 +550,7 @@ func checkCommands(s BuildSchema, t BuildTarget, commands []string) map[string]s
 		}
 	}
 	var missing []string
-	for _, c := range s.TargetCommands(t) {
+	for _, c := range s.PlatformCommands(t, platform) {
 		if c.Required && !listed[c.ID] {
 			missing = append(missing, c.ID)
 		}

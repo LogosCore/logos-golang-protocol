@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -225,7 +226,7 @@ func TestBuildSchemaCommands(t *testing.T) {
 		t.Errorf("linux-elf commands = %v, want %v (no screenshot)", got, want)
 	}
 	// Required and default ones, in the schema's order; screenshot is neither.
-	if got, want := s.DefaultCommands(exe), []string{"sleep", "exit", "shell", "download"}; !reflect.DeepEqual(got, want) {
+	if got, want := s.DefaultCommands(exe, "windows/amd64"), []string{"sleep", "exit", "shell", "download"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("DefaultCommands = %v, want %v", got, want)
 	}
 	if c, ok := s.Command("sleep"); !ok || len(c.Params) != 2 || !c.Required {
@@ -238,7 +239,7 @@ func TestBuildSchemaCommands(t *testing.T) {
 	if !(BuildCommand{ID: "ls"}).OverKind(KindBindCall) || !shell.OverKind(KindReversePersistent) || shell.OverKind(KindReverseCall) {
 		t.Error("OverKind")
 	}
-	if got := (BuildSchema{}).DefaultCommands(exe); got == nil || len(got) != 0 {
+	if got := (BuildSchema{}).DefaultCommands(exe, "windows/amd64"); got == nil || len(got) != 0 {
 		t.Errorf("no commands: DefaultCommands = %#v, want an empty list", got)
 	}
 }
@@ -549,5 +550,80 @@ func TestBuildSchemaErrorCodes(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "error_codes") {
 		t.Errorf("none declared, yet the JSON names them: %s", raw)
+	}
+}
+
+// A command for some platforms (BuildCommand.Platforms) is on builds for
+// those alone, as a build field for some platforms is: offered, picked by
+// default, required and taken there, refused elsewhere; each platform is one
+// its targets build for, and a composite's uses cover its platforms (docs:
+// contracts/minion-build.md, Commands for some platforms).
+func TestCommandsForSomePlatforms(t *testing.T) {
+	ids := func(cs []BuildCommand) []string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return out
+	}
+	s := compositeSchema(t)
+	// shell (a default) on 64-bit x86 alone, and a required command for
+	// linux/arm alone.
+	command(t, &s, "shell").Platforms = []string{"any/amd64"}
+	s = withCommand(s, BuildCommand{ID: "gpio", Op: 9, Label: "GPIO", Required: true, Platforms: []string{"linux/arm"}})
+	if err := ValidateBuildSchema(s); err != nil {
+		t.Fatal(err)
+	}
+	elf := target(t, s, "linux-elf")
+	if got := ids(s.TargetCommands(elf)); !slices.Contains(got, "shell") || !slices.Contains(got, "gpio") {
+		t.Errorf("the target's commands on one platform or another: %v", got)
+	}
+	if got, want := ids(s.PlatformCommands(elf, "linux/amd64")), []string{"sleep", "exit", "shell", "download", "ls", "rm", "archive"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("linux/amd64: %v, want %v", got, want)
+	}
+	if got, want := ids(s.PlatformCommands(elf, "linux/arm")), []string{"sleep", "exit", "download", "ls", "rm", "archive", "gpio"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("linux/arm: %v, want %v", got, want)
+	}
+	if got, want := s.DefaultCommands(elf, "linux/arm"), []string{"sleep", "exit", "download", "gpio"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("defaults on linux/arm: %v, want %v", got, want)
+	}
+	if got, want := s.PickCommands(elf, "linux/arm", []string{"shell", "ls"}), []string{"sleep", "exit", "ls", "gpio"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("picked on linux/arm: %v, want %v (shell is not on it)", got, want)
+	}
+	if got, want := s.PickCommands(elf, "linux/amd64", nil), []string{"sleep", "exit"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("none picked on linux/amd64: %v, want %v (gpio is not required there)", got, want)
+	}
+	p := checkCommands(s, elf, "linux/arm", []string{"sleep", "exit", "shell"})
+	if p["commands[2]"] != `"shell" is only for any/amd64` || p["commands"] != `target "linux-elf" requires gpio` || len(p) != 2 {
+		t.Errorf("a build for linux/arm: %v", p)
+	}
+	if p := checkCommands(s, elf, "linux/amd64", []string{"sleep", "exit", "shell"}); len(p) != 0 {
+		t.Errorf("a build for linux/amd64: %v", p)
+	}
+
+	for name, c := range map[string]struct {
+		mutate func(s *BuildSchema)
+		want   string
+	}{
+		"not os/arch":     {func(s *BuildSchema) { command(t, s, "shell").Platforms = []string{"windows"} }, "must be os/arch"},
+		"twice":           {func(s *BuildSchema) { command(t, s, "shell").Platforms = []string{"any/amd64", "any/amd64"} }, "duplicate platform"},
+		"none its builds": {func(s *BuildSchema) { command(t, s, "screenshot").Platforms = []string{"linux/amd64"} }, "matches none its builds can be for"},
+		// archive uses download: on every platform archive is on.
+		"a composite's uses": {func(s *BuildSchema) { command(t, s, "download").Platforms = []string{"windows/amd64"} },
+			`uses: "download" is not on platform`},
+	} {
+		s := compositeSchema(t)
+		c.mutate(&s)
+		if err := ValidateBuildSchema(s); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", name, err, c.want)
+		}
+	}
+	// A composite narrowed with what it uses is fine.
+	s = compositeSchema(t)
+	command(t, &s, "download").Platforms = []string{"windows/amd64"}
+	command(t, &s, "archive").Platforms = []string{"windows/amd64"}
+	command(t, &s, "archive").Targets = []string{"windows-exe"}
+	if err := ValidateBuildSchema(s); err != nil {
+		t.Errorf("a composite on its uses' platforms: %v", err)
 	}
 }

@@ -594,18 +594,20 @@ func isJSONObject(raw []byte) bool {
 // a composite one that is its subtasks alone.
 func (c BuildCommand) HasOp() bool { return c.Op != 0 }
 
-// PickCommands returns the commands a build of target t has when an operator
-// picks ids (DefaultCommands for a build that names none): those picked and
-// the target's required ones, with what each composite among them uses, and
-// what those use in turn, in the schema's order. A composite with no op of
-// its own builds nothing, so it is not among them: a session has it once its
-// build has every command it uses (SessionCommands).
-func (s BuildSchema) PickCommands(t BuildTarget, ids []string) []string {
+// PickCommands returns the commands a build of target t for platform has
+// when an operator picks ids (DefaultCommands for a build that names none):
+// those picked and the required ones of the target and platform, with what
+// each composite among them uses, and what those use in turn, in the
+// schema's order; one picked that is not on t or platform is not among
+// them. A composite with no op of its own builds nothing, so it is not
+// among them: a session has it once its build has every command it uses
+// (SessionCommands).
+func (s BuildSchema) PickCommands(t BuildTarget, platform string, ids []string) []string {
 	picked := map[string]bool{}
 	var pick func(id string)
 	pick = func(id string) {
 		c, ok := s.Command(id)
-		if !ok || !c.For(t.ID) || picked[id] {
+		if !ok || !c.For(t.ID) || !c.OnPlatform(platform) || picked[id] {
 			return
 		}
 		picked[id] = true
@@ -616,13 +618,14 @@ func (s BuildSchema) PickCommands(t BuildTarget, ids []string) []string {
 	for _, id := range ids {
 		pick(id)
 	}
-	for _, c := range s.TargetCommands(t) {
+	commands := s.PlatformCommands(t, platform)
+	for _, c := range commands {
 		if c.Required {
 			pick(c.ID)
 		}
 	}
 	out := []string{}
-	for _, c := range s.TargetCommands(t) {
+	for _, c := range commands {
 		if picked[c.ID] && c.HasOp() {
 			out = append(out, c.ID)
 		}
@@ -630,12 +633,13 @@ func (s BuildSchema) PickCommands(t BuildTarget, ids []string) []string {
 	return out
 }
 
-// SessionCommands returns what a session of a build of target t can run: the
-// build's commands, and each composite with no op of its own whose commands
-// it uses the build all has, in the schema's order.
-func (s BuildSchema) SessionCommands(t BuildTarget, build []string) []string {
+// SessionCommands returns what a session of a build of target t for
+// platform can run: the build's commands, and each composite with no op of
+// its own, on the platform, whose commands it uses the build all has, in the
+// schema's order.
+func (s BuildSchema) SessionCommands(t BuildTarget, platform string, build []string) []string {
 	out := []string{}
-	for _, c := range s.TargetCommands(t) {
+	for _, c := range s.PlatformCommands(t, platform) {
 		switch {
 		case slices.Contains(build, c.ID):
 			out = append(out, c.ID)
@@ -681,7 +685,7 @@ func validateComposite(c BuildCommand) error {
 
 // validateComposites checks what each composite command of s uses: commands
 // of the schema with an op of their own, each on every target the composite
-// is on.
+// is on, and on every platform of it the composite is on (Platforms).
 func validateComposites(s BuildSchema) error {
 	for _, c := range s.Commands {
 		for _, id := range c.Uses {
@@ -697,6 +701,11 @@ func validateComposites(s BuildSchema) error {
 			for _, t := range s.Targets {
 				if c.For(t.ID) && !u.For(t.ID) {
 					return fmt.Errorf("command %q: uses: %q is not on target %q, which %q is on", c.ID, id, t.ID, c.ID)
+				}
+				for _, p := range t.Platforms {
+					if c.For(t.ID) && c.OnPlatform(p) && !u.OnPlatform(p) {
+						return fmt.Errorf("command %q: uses: %q is not on platform %s of target %q, which %q is on", c.ID, id, p, t.ID, c.ID)
+					}
 				}
 			}
 		}
