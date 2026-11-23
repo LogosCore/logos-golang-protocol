@@ -165,11 +165,13 @@ type FieldSpec struct {
 	// fields too, whether anything reads it by number yet or not. A
 	// manifest's properties and an action's params have none.
 	Num int `json:"num,omitempty"`
-	// When makes a param apply only while another param of its form holds
-	// one of some values (a tunnel's host, only with front forward). A form
-	// shows it only then; a value given otherwise is refused, and its
-	// default is not filled in. Only a command's or an action's params have
-	// one.
+	// When makes a field apply only while another field of its form holds
+	// one of some values (a tunnel's host, only with front forward; a
+	// proxy's address, only with route proxy). A form shows it only then; a
+	// value given otherwise is refused, and its default is not filled in.
+	// A command's or an action's params have one, and a connection schema's
+	// fields: a kind's, naming one of the kind's fields, and its target's,
+	// naming one of the target's (ValidateConnectionSchema).
 	When *FieldCondition `json:"when,omitempty"`
 	// Advanced is a param one seldom changes (a connect timeout): a form
 	// shows it under More options, folded. Only a command's or an action's
@@ -523,12 +525,13 @@ func validateConnectionFieldSpec(f FieldSpec) error { return checkFieldSpec(f, s
 // validateBuildFieldSpec checks a field of a build schema.
 func validateBuildFieldSpec(f FieldSpec) error { return checkFieldSpec(f, scopeBuild) }
 
-// notParam refuses, for a field that is no param (a property, a
-// connection's or a build's field), what only a form of params takes: a
-// condition (When) and Advanced.
+// notParam refuses, for a field that is no param (a property, a build's
+// field, a connection parameter), what only a form of params takes: a
+// condition (When) and Advanced. A connection schema's fields take a
+// condition too (ValidateConnectionSchema).
 func notParam(f FieldSpec) error {
 	if f.When != nil || f.Advanced {
-		return fmt.Errorf("when and advanced are only for a command's or an action's params")
+		return fmt.Errorf("when and advanced are only for a command's or an action's params (when for a connection schema's fields too)")
 	}
 	return nil
 }
@@ -542,20 +545,23 @@ func validateParamConditions(params, others []FieldSpec) error {
 		if p.When == nil {
 			continue
 		}
-		if err := checkCondition(*p.When, p.Key, form); err != nil {
+		if err := checkCondition(*p.When, p.Key, form, "param"); err != nil {
 			return fmt.Errorf("param %q: when: %w", p.Key, err)
 		}
 	}
 	return nil
 }
 
-func checkCondition(c FieldCondition, key string, form []FieldSpec) error {
+// checkCondition checks c, the condition of the form's field key: it names
+// another of the form's fields (a param, a field: noun says which), an enum
+// with no condition of its own, by its options, each once.
+func checkCondition(c FieldCondition, key string, form []FieldSpec, noun string) error {
 	if c.Key == key {
-		return fmt.Errorf("it names the param itself")
+		return fmt.Errorf("it names the %s itself", noun)
 	}
 	i := slices.IndexFunc(form, func(f FieldSpec) bool { return f.Key == c.Key })
 	if i < 0 {
-		return fmt.Errorf("%q is no param of the form", c.Key)
+		return fmt.Errorf("%q is no %s of the form", c.Key, noun)
 	}
 	on := form[i]
 	if on.Type != FieldEnum {

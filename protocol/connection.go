@@ -50,10 +50,12 @@ type ConnectionSchema struct {
 
 // ConnectionKind is what a connection of one kind is given: Fields, built
 // into a minion (and kept as an endpoint), and, for a bind kind, Target,
-// what operators fill in for each target. MaxMessage is the largest minion
-// message (its CBOR plaintext, before sealing) the channel carries each way
-// on a connection of the kind, MinConnectionMessage to MaxMinionMessageSize;
-// 0: MaxMinionMessageSize. A channel whose transport carries little (a DNS
+// what operators fill in for each target. A field of either may apply only
+// while an enum of its own list holds some values (FieldSpec.When).
+// MaxMessage is the largest minion message (its CBOR plaintext, before
+// sealing) the channel carries each way on a connection of the kind,
+// MinConnectionMessage to MaxMinionMessageSize; 0: MaxMinionMessageSize.
+// A channel whose transport carries little (a DNS
 // query) says so here: core keeps what it sends within it, and the build
 // gives it to the minion (BuildConnection.MaxMessage).
 //
@@ -219,7 +221,10 @@ func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindB
 // declared default satisfies its own field spec: at least one kind, each a
 // known kind with its fields (and, for a bind kind only, its target and
 // agentless; for bind-call only, its max_call; for bind-persistent only,
-// its max_open), keys unique within the kind.
+// its max_open), keys unique within the kind. A field's condition (When)
+// names an enum of its own list, the kind's fields or its target's, with no
+// condition of its own (checkFieldConditions); none is Advanced, which only
+// params are.
 func ValidateConnectionSchema(s ConnectionSchema) error {
 	if s.SchemaVersion != ConnectionSchemaV2 {
 		return fmt.Errorf("unsupported connection schema_version %q", s.SchemaVersion)
@@ -267,13 +272,19 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 			if err := validateConnectionFieldSpec(f); err != nil {
 				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
 			}
-			if err := notParam(f); err != nil {
-				return fmt.Errorf("kinds.%s: field %q: %w", kind, f.Key, err)
+			if f.Advanced {
+				return fmt.Errorf("kinds.%s: field %q: advanced is only for a command's or an action's params", kind, f.Key)
 			}
 			if keys[f.Key] {
 				return fmt.Errorf("kinds.%s: duplicate field key %q", kind, f.Key)
 			}
 			keys[f.Key] = true
+		}
+		if err := checkFieldConditions(k.Fields); err != nil {
+			return fmt.Errorf("kinds.%s: %w", kind, err)
+		}
+		if err := checkFieldConditions(k.Target); err != nil {
+			return fmt.Errorf("kinds.%s: target %w", kind, err)
 		}
 		for _, f := range append(slices.Clone(k.Fields), k.Target...) {
 			if f.Num == 0 {
@@ -286,6 +297,22 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 	}
 	if err := checkFieldNumbers(kindFields...); err != nil {
 		return fmt.Errorf("kinds: %w", err)
+	}
+	return nil
+}
+
+// checkFieldConditions checks the conditions (FieldSpec.When) of a
+// connection kind's fields, or of its target's, against that list alone: an
+// endpoint's form holds the kind's fields, a target's form its target's
+// (docs: contracts/minion-connection.md, Fields that depend on another).
+func checkFieldConditions(fields []FieldSpec) error {
+	for _, f := range fields {
+		if f.When == nil {
+			continue
+		}
+		if err := checkCondition(*f.When, f.Key, fields, "field"); err != nil {
+			return fmt.Errorf("field %q: when: %w", f.Key, err)
+		}
 	}
 	return nil
 }
@@ -308,9 +335,10 @@ func (s ConnectionSchema) Numbered(kind string) bool {
 }
 
 // ValidateConnectionValues checks values against kind's fields in s: every
-// key must be declared, every value valid, every required field set. It
-// returns the problems by key (nil when there are none); an undeclared key
-// is reported under its own name. A kind the channel does not carry is a
+// key must be declared, every value valid, every required field set. A field
+// whose condition (When) does not hold takes no value, and is not required.
+// It returns the problems by key (nil when there are none); an undeclared
+// key is reported under its own name. A kind the channel does not carry is a
 // problem under "".
 func ValidateConnectionValues(s ConnectionSchema, kind string, values map[string]any) map[string]string {
 	if _, ok := s.Kinds[kind]; !ok {
@@ -332,14 +360,15 @@ func ValidateTargetValues(s ConnectionSchema, kind string, values map[string]any
 }
 
 // ResolveTargetValues are a target's values over its kind's target
-// defaults, for its target fields only.
+// defaults, for its target fields only, those whose condition (When) holds.
 func ResolveTargetValues(s ConnectionSchema, kind string, values map[string]any) map[string]any {
 	return ResolveFieldValues(s.TargetFields(kind), values)
 }
 
 // ResolveConnectionValues is what a minion is given for a connection of
 // kind: values over the kind's defaults, for its fields only. Fields with
-// neither are left out.
+// neither are left out, and so are those whose condition (When) does not
+// hold: nothing after core evaluates one.
 func ResolveConnectionValues(s ConnectionSchema, kind string, values map[string]any) map[string]any {
 	return ResolveFieldValues(s.KindFields(kind), values)
 }
