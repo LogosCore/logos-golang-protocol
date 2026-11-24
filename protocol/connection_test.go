@@ -48,6 +48,13 @@ func TestValidateConnectionSchema(t *testing.T) {
 	if err := ValidateConnectionSchema(small); err != nil || small.MessageLimit(KindReverseCall) != 4096 {
 		t.Fatalf("a kind that carries little: %v %d", err, small.MessageLimit(KindReverseCall))
 	}
+	summed := validConnection()
+	rk := summed.Kinds[KindReverseCall]
+	rk.Summary = []string{"base_url", "headers"}
+	summed.Kinds[KindReverseCall] = rk
+	if err := ValidateConnectionSchema(summed); err != nil {
+		t.Fatalf("a summary: %v", err)
+	}
 	agentless := validConnection()
 	b := agentless.Kinds[KindBindCall]
 	b.Agentless = true
@@ -94,6 +101,27 @@ func TestValidateConnectionSchema(t *testing.T) {
 			k := s.Kinds[KindReverseCall]
 			k.Agentless = true
 			s.Kinds[KindReverseCall] = k
+		},
+		"none of the kind's fields": func(s *ConnectionSchema) {
+			k := s.Kinds[KindBindCall]
+			k.Summary = []string{"url"} // a target's field
+			s.Kinds[KindBindCall] = k
+		},
+		`summary: "base_url" twice`: func(s *ConnectionSchema) {
+			k := s.Kinds[KindReverseCall]
+			k.Summary = []string{"base_url", "base_url"}
+			s.Kinds[KindReverseCall] = k
+		},
+		"never shown in a list": func(s *ConnectionSchema) {
+			k := s.Kinds[KindReverseCall]
+			k.Fields = append(slices.Clone(k.Fields), FieldSpec{Key: "token", Num: 9, Type: FieldSecret})
+			k.Summary = []string{"base_url", "token"}
+			s.Kinds[KindReverseCall] = k
+		},
+		"summary: 4 fields at most": func(s *ConnectionSchema) {
+			k := s.Kinds[KindReversePersistent]
+			k.Summary = []string{"base_url", "tls_verify", "request_timeout", "headers", "ws_backoff"}
+			s.Kinds[KindReversePersistent] = k
 		},
 		"version must be": func(s *ConnectionSchema) { s.Version = 0 },
 		"at least one":    func(s *ConnectionSchema) { s.Kinds = nil },

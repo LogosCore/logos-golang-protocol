@@ -31,6 +31,9 @@ const RegisterFieldConnection = "connection"
 // MaxConnectionFields bounds a connection kind's fields, and its target's.
 const MaxConnectionFields = 32
 
+// MaxConnectionSummary bounds a kind's Summary.
+const MaxConnectionSummary = 4
+
 // ConnectionSchema is declared by a channel in module.register under
 // "connection": for each connection kind it carries, the fields a minion is
 // given to reach it.
@@ -83,6 +86,13 @@ type ConnectionSchema struct {
 // release that carries it. Never with Agentless: agentless kinds are not
 // delegated.
 //
+// Summary names up to MaxConnectionSummary of the kind's Fields (not its
+// Target), each once, none a secret or a credential: the settings that tell people one connection of the
+// kind from another, in the order shown (an address, a mode). The web app
+// shows a connection by its kind and these settings' values, the ones set;
+// without them, by the first settings set. Display alone: a minion reads
+// nothing of it, so it needs no Version.
+//
 // MaxOpen, for bind-persistent only, is the same for an open: how long the
 // channel may take to open a connection of the kind (a dial, a login), as
 // a duration, MinOpenLimit to MaxOpenLimit. Core waits as long again for
@@ -98,6 +108,8 @@ type ConnectionKind struct {
 	MaxOpen    string      `json:"max_open,omitempty"`
 	// DelegatedOnly: only delegates carry the kind.
 	DelegatedOnly bool `json:"delegated_only,omitempty"`
+	// Summary: the fields that tell its connections apart, for people.
+	Summary []string `json:"summary,omitempty"`
 }
 
 // The bounds of a kind's MaxCall and MaxOpen.
@@ -217,6 +229,31 @@ func (s ConnectionSchema) IsDelegatedOnly(kind string) bool {
 // bind-persistent): its minions have targets.
 func IsBindKind(kind string) bool { return kind == KindBindCall || kind == KindBindPersistent }
 
+// checkSummary checks a kind's Summary: up to MaxConnectionSummary keys of
+// its Fields, each once, none a secret or a credential (a summary is shown
+// wherever the connection is listed).
+func checkSummary(k ConnectionKind) error {
+	if len(k.Summary) > MaxConnectionSummary {
+		return fmt.Errorf("summary: %d fields at most", MaxConnectionSummary)
+	}
+	seen := map[string]bool{}
+	for _, key := range k.Summary {
+		i := slices.IndexFunc(k.Fields, func(f FieldSpec) bool { return f.Key == key })
+		if i < 0 {
+			return fmt.Errorf("summary: %q is none of the kind's fields", key)
+		}
+		switch k.Fields[i].Type {
+		case FieldSecret, FieldCredential, FieldCredentialList:
+			return fmt.Errorf("summary: %q is a %s: never shown in a list", key, k.Fields[i].Type)
+		}
+		if seen[key] {
+			return fmt.Errorf("summary: %q twice", key)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
 // ValidateConnectionSchema checks a schema's structure, limits, and that every
 // declared default satisfies its own field spec: at least one kind, each a
 // known kind with its fields (and, for a bind kind only, its target and
@@ -279,6 +316,9 @@ func ValidateConnectionSchema(s ConnectionSchema) error {
 				return fmt.Errorf("kinds.%s: duplicate field key %q", kind, f.Key)
 			}
 			keys[f.Key] = true
+		}
+		if err := checkSummary(k); err != nil {
+			return fmt.Errorf("kinds.%s: %w", kind, err)
 		}
 		if err := checkFieldConditions(k.Fields); err != nil {
 			return fmt.Errorf("kinds.%s: %w", kind, err)
