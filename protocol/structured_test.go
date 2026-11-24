@@ -175,7 +175,7 @@ func TestStructuredConnection(t *testing.T) {
 	if err := checkCommandParam(p); err != nil {
 		t.Fatalf("a connection param refused: %v", err)
 	}
-	good := map[string]any{"channel": "http", "kind": KindReverseCall, "name": "front", "max_message": 4096,
+	good := map[string]any{"channel": "http", "kind": KindReverseCall, "max_message": 4096,
 		"params": map[string]any{"url": "https://a.example"}, "values": map[string]any{"method": "PUT"},
 		"failover": map[string]any{"auto": false, "fail_after": 3}}
 	args, problems := TaskArgs([]FieldSpec{p}, map[string]any{"conn": good})
@@ -186,7 +186,7 @@ func TestStructuredConnection(t *testing.T) {
 	for name, bad := range map[string]map[string]any{
 		"no channel":  {"kind": KindReverseCall},
 		"bad kind":    {"channel": "http", "kind": "pigeon"},
-		"bad name":    {"channel": "http", "kind": KindReverseCall, "name": "Front Door"},
+		"a name":      {"channel": "http", "kind": KindReverseCall, "name": "front"},
 		"unknown key": {"channel": "http", "kind": KindReverseCall, "colour": "red"},
 		"big message": {"channel": "http", "kind": KindReverseCall, "max_message": MaxMinionMessageSize + 1},
 		"params list": {"channel": "http", "kind": KindReverseCall, "params": []any{"x"}},
@@ -209,7 +209,7 @@ func TestStructuredConnection(t *testing.T) {
 	if problems != nil {
 		t.Fatal(problems)
 	}
-	if c.Channel != "http" || c.Kind != KindReverseCall || c.Name != "front" || c.MaxMessage != 4096 ||
+	if c.Channel != "http" || c.Kind != KindReverseCall || c.MaxMessage != 4096 ||
 		c.Params[1] != "https://a.example" || c.Params[2] != uint64(30000) || c.Values[1] != "PUT" ||
 		c.Failover == nil || c.Failover.Auto == nil || *c.Failover.Auto || c.Failover.FailAfter != 3 {
 		t.Fatalf("connection %+v", c)
@@ -252,7 +252,7 @@ func TestStructuredConnection(t *testing.T) {
 // null in a task's args, and its removal survives the trip.
 func TestConnectionPatch(t *testing.T) {
 	auto := true
-	old := HelloConnection{Channel: "http", Kind: KindReverseCall, Name: "front", Version: 3,
+	old := HelloConnection{Channel: "http", Kind: KindReverseCall, Version: 3,
 		Params: map[uint64]any{1: "http://a", 5: uint64(1000), 7: "ua"}, Values: map[uint64]any{1: "POST", 2: "/"}}
 	with := func(f func(c *HelloConnection)) HelloConnection {
 		c := old
@@ -269,7 +269,6 @@ func TestConnectionPatch(t *testing.T) {
 			return len(p.Values) == 1 && p.Values[2] == "/new/2" && p.Params == nil && !p.Whole()
 		}},
 		"one gone":    {with(func(c *HelloConnection) { delete(c.Params, 7) }), func(p ConnectionPatch) bool { v, ok := p.Params[7]; return ok && v == nil && len(p.Params) == 1 }},
-		"a name":      {with(func(c *HelloConnection) { c.Name = "back" }), func(p ConnectionPatch) bool { return p.Name == "back" && p.Params == nil }},
 		"failover":    {with(func(c *HelloConnection) { c.Failover = &HelloConnectionFailover{Auto: &auto} }), func(p ConnectionPatch) bool { return p.Failover != nil && *p.Failover.Auto }},
 		"max_message": {with(func(c *HelloConnection) { c.MaxMessage = 4096 }), func(p ConnectionPatch) bool { return p.MaxMessage != nil && *p.MaxMessage == 4096 }},
 		"a kind": {with(func(c *HelloConnection) { c.Kind = KindReversePersistent; delete(c.Values, 1) }), func(p ConnectionPatch) bool {

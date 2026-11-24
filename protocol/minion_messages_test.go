@@ -491,7 +491,7 @@ func TestReackItem(t *testing.T) {
 func TestHelloConnections(t *testing.T) {
 	base := func() HelloItem {
 		return HelloItem{T: ItemHello, OS: "linux", Arch: "amd64", Conn: 2, Connections: []HelloConnection{
-			{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "tcp", Kind: KindReversePersistent, Name: "b"}}}
+			{Channel: "http", Kind: KindReverseCall}, {Channel: "http", Kind: KindReverseCall}}}
 	}
 	if err := base().Validate(); err != nil {
 		t.Fatal(err)
@@ -501,7 +501,7 @@ func TestHelloConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	var back HelloItem
-	if err := UnmarshalCBOR(b, &back); err != nil || len(back.Connections) != 2 || back.Connections[1].Channel != "tcp" {
+	if err := UnmarshalCBOR(b, &back); err != nil || len(back.Connections) != 2 || back.Connections[1].Kind != KindReverseCall {
 		t.Fatalf("round trip: %v %+v", err, back.Connections)
 	}
 	for name, mod := range map[string]func(*HelloItem){
@@ -509,7 +509,6 @@ func TestHelloConnections(t *testing.T) {
 		"conn past":    func(h *HelloItem) { h.Conn = 3 },
 		"no channel":   func(h *HelloItem) { h.Connections[0].Channel = "" },
 		"unknown kind": func(h *HelloItem) { h.Connections[0].Kind = "carrier-pigeon" },
-		"same name":    func(h *HelloItem) { h.Connections[1].Name = "a" },
 		"max_message":  func(h *HelloItem) { h.Connections[0].MaxMessage = MaxMinionMessageSize + 1 },
 	} {
 		h := base()
@@ -527,7 +526,7 @@ func TestHelloConnections(t *testing.T) {
 
 func TestConnectionUpdate(t *testing.T) {
 	u := ConnectionUpdateItem{T: ItemConnectionUpdate, Connections: []HelloConnection{
-		{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "dns", Kind: KindReversePersistent}}}
+		{Channel: "http", Kind: KindReverseCall}, {Channel: "dns", Kind: KindReversePersistent}}}
 	if err := u.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -561,9 +560,8 @@ func TestConnectionUpdate(t *testing.T) {
 		t.Fatalf("removed past the list before: %v", err)
 	}
 	for name, bad := range map[string][]HelloConnection{
-		"none":      nil,
-		"bad kind":  {{Channel: "http", Kind: "x"}},
-		"same name": {{Channel: "http", Kind: KindReverseCall, Name: "a"}, {Channel: "dns", Kind: KindReverseCall, Name: "a"}},
+		"none":     nil,
+		"bad kind": {{Channel: "http", Kind: "x"}},
 	} {
 		if (ConnectionUpdateItem{T: ItemConnectionUpdate, Connections: bad}).Validate() == nil {
 			t.Errorf("%s: taken", name)

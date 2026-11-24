@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -232,19 +231,15 @@ func ArgStructured[K comparable](args map[K]any, key K, out any) (ok bool, err e
 }
 
 // A structured value of FormatConnection is one connection, as a build's,
-// by names: {"channel", "kind", "name"?, "version"?, "params"?, "values"?,
+// by names: {"channel", "kind", "version"?, "params"?, "values"?,
 // "failover"?, "max_message"?}. Its shape is checked here (TaskArgs); core
 // checks it against the channel's fields and the factory's connection
 // parameters and puts the minion's numbered form in the arg's place
 // (ConnectionArg), as it puts a credential in place of its id.
 
-// connectionNamePattern is what a connection's name matches: a slug, as an
-// endpoint's.
-var connectionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-
 // checkConnectionValue checks a connection value's shape, in its CBOR form
 // (structuredForm): an object of the keys FormatConnection names, a channel,
-// one of the connection kinds, a slug name, params and values objects, a
+// one of the connection kinds, params and values objects, a
 // failover's auto and fail_after, a max_message within the protocol's.
 func checkConnectionValue(v any) error {
 	m, ok := v.(map[string]any)
@@ -253,7 +248,7 @@ func checkConnectionValue(v any) error {
 	}
 	for k := range m {
 		switch k {
-		case "channel", "kind", "name", "version", "params", "values", "failover", "max_message":
+		case "channel", "kind", "version", "params", "values", "failover", "max_message":
 		default:
 			return fmt.Errorf("a connection has no %q", k)
 		}
@@ -266,11 +261,6 @@ func checkConnectionValue(v any) error {
 	default:
 		return fmt.Errorf("a connection's kind is one of %s, %s, %s, %s", KindReverseCall, KindReversePersistent, KindBindCall,
 			KindBindPersistent)
-	}
-	if n, ok := m["name"]; ok {
-		if s, _ := n.(string); !connectionNamePattern.MatchString(s) {
-			return fmt.Errorf("a connection's name matches %s", connectionNamePattern)
-		}
 	}
 	if n, ok := m["version"]; ok {
 		if i, ok := AsInt64(n); !ok || i < 0 {
@@ -327,7 +317,6 @@ func ConnectionArg(v any, channel, factory []FieldSpec) (HelloConnection, map[st
 	m := v.(map[string]any)
 	c.Channel, _ = m["channel"].(string)
 	c.Kind, _ = m["kind"].(string)
-	c.Name, _ = m["name"].(string)
 	if n, ok := AsInt64(m["version"]); ok {
 		c.Version = uint64(n) //nolint:gosec // checked: not negative
 	}
@@ -388,12 +377,12 @@ func connectionValues(fields []FieldSpec, values map[string]any) (map[uint64]any
 // changed of the connection at its place. With Channel and Kind (Whole),
 // the connection whole, in place of the old one: its params follow another
 // schema. Else only what differs: the Params and Values that changed, a nil
-// value for one gone, and Name, Version, Failover and MaxMessage when they
+// value for one gone, and Version, Failover and MaxMessage when they
 // change. DiffConnection makes one; Apply takes it.
 type ConnectionPatch struct {
-	Channel    string                   `cbor:"1,keyasint,omitempty"`
-	Kind       string                   `cbor:"2,keyasint,omitempty"`
-	Name       string                   `cbor:"3,keyasint,omitempty"`
+	Channel string `cbor:"1,keyasint,omitempty"`
+	Kind    string `cbor:"2,keyasint,omitempty"`
+	// 3 was the name: a session's connections have none.
 	Version    *uint64                  `cbor:"4,keyasint,omitempty"`
 	Params     map[uint64]any           `cbor:"5,keyasint,omitempty"`
 	Values     map[uint64]any           `cbor:"6,keyasint,omitempty"`
@@ -407,7 +396,7 @@ func (p ConnectionPatch) Whole() bool { return p.Channel != "" || p.Kind != "" }
 
 // Empty reports whether p changes nothing.
 func (p ConnectionPatch) Empty() bool {
-	return !p.Whole() && p.Name == "" && p.Version == nil && len(p.Params) == 0 && len(p.Values) == 0 && p.Failover == nil &&
+	return !p.Whole() && p.Version == nil && len(p.Params) == 0 && len(p.Values) == 0 && p.Failover == nil &&
 		p.MaxMessage == nil
 }
 
@@ -431,8 +420,7 @@ func (p ConnectionPatch) Validate() error {
 // or kind differs, else what differs of it.
 func DiffConnection(old, new HelloConnection) ConnectionPatch {
 	if old.Channel != new.Channel || old.Kind != new.Kind {
-		p := ConnectionPatch{Channel: new.Channel, Kind: new.Kind, Name: new.Name, Params: new.Params, Values: new.Values,
-			Failover: new.Failover}
+		p := ConnectionPatch{Channel: new.Channel, Kind: new.Kind, Params: new.Params, Values: new.Values, Failover: new.Failover}
 		if new.Version != 0 {
 			p.Version = &new.Version
 		}
@@ -442,9 +430,6 @@ func DiffConnection(old, new HelloConnection) ConnectionPatch {
 		return p
 	}
 	var p ConnectionPatch
-	if new.Name != old.Name {
-		p.Name = new.Name
-	}
 	if new.Version != old.Version {
 		p.Version = &new.Version
 	}
@@ -466,7 +451,7 @@ func DiffConnection(old, new HelloConnection) ConnectionPatch {
 // changes.
 func (p ConnectionPatch) Apply(old HelloConnection) HelloConnection {
 	if p.Whole() {
-		c := HelloConnection{Channel: p.Channel, Kind: p.Kind, Name: p.Name, Params: p.Params, Values: p.Values, Failover: p.Failover}
+		c := HelloConnection{Channel: p.Channel, Kind: p.Kind, Params: p.Params, Values: p.Values, Failover: p.Failover}
 		if p.Version != nil {
 			c.Version = *p.Version
 		}
@@ -476,9 +461,6 @@ func (p ConnectionPatch) Apply(old HelloConnection) HelloConnection {
 		return c
 	}
 	c := old
-	if p.Name != "" {
-		c.Name = p.Name
-	}
 	if p.Version != nil {
 		c.Version = *p.Version
 	}

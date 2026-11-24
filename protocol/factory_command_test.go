@@ -57,7 +57,7 @@ const (
     "late_at": "2026-11-22T14:31:04Z",
     "lost_at": "2026-11-22T14:32:16Z",
     "connected": false,
-    "conn": 1, "conn_kind": "reverse-call", "conn_name": "edge-eu", "conn_count": 1,
+    "conn": 1, "conn_kind": "reverse-call", "conn_count": 1,
     "max_tasks": 1,
     "feedback_errors": 0,
     "crypto": { "suite": "aes-256-cbc-hmac-sha256", "material": { "enc_key": "…", "mac_key": "…" } }
@@ -321,7 +321,7 @@ func TestFactoryCommandRequestChecks(t *testing.T) {
 			r.Session.Via = []SessionVia{{SessionID: "x", Number: 1, TaskID: "y"}}
 		}, "via[0]"},
 		{"a connection of no kind", func(r *FactoryCommandRequest) {
-			r.Session.Connections = []SessionConnection{{Channel: "http", Kind: "carrier-pigeon", Name: "edge-eu"}}
+			r.Session.Connections = []SessionConnection{{Channel: "http", Kind: "carrier-pigeon"}}
 		}, `kind "carrier-pigeon"`},
 		{"a restart of no build", func(r *FactoryCommandRequest) {
 			r.Session.Restarts = []SessionRestart{{At: time.Now(), PID: 7, BuildID: "nope"}}

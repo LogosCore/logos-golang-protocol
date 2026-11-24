@@ -244,9 +244,9 @@ type HelloItem struct {
 // (BuildConnection) in numbered form, params and values by their fields'
 // numbers.
 type HelloConnection struct {
-	Channel    string                   `cbor:"1,keyasint"`
-	Kind       string                   `cbor:"2,keyasint"`
-	Name       string                   `cbor:"3,keyasint,omitempty"`
+	Channel string `cbor:"1,keyasint"`
+	Kind    string `cbor:"2,keyasint"`
+	// 3 was its name: a session's connections have none, its place says it.
 	Version    uint64                   `cbor:"4,keyasint,omitempty"`
 	Params     map[uint64]any           `cbor:"5,keyasint,omitempty"`
 	Values     map[uint64]any           `cbor:"6,keyasint,omitempty"`
@@ -423,18 +423,11 @@ func (h HelloItem) Validate() error {
 }
 
 // validateConnections checks a list of a minion's connections: each one's
-// shape, and names unique.
+// shape.
 func validateConnections(conns []HelloConnection) error {
-	names := map[string]bool{}
 	for _, c := range conns {
 		if err := c.Validate(); err != nil {
 			return err
-		}
-		if c.Name != "" {
-			if names[c.Name] {
-				return fmt.Errorf("connection name %q twice", c.Name)
-			}
-			names[c.Name] = true
 		}
 	}
 	return nil

@@ -264,12 +264,11 @@ type SessionRecord struct {
 	LostAt *time.Time    `json:"lost_at,omitempty"`
 	// Connected: a persistent connection serving it is open.
 	Connected bool `json:"connected"`
-	// Conn is the connection its minion uses, its place from 1, ConnKind and
-	// ConnName that connection's, ConnCount how many it has, and ConnChanges
+	// Conn is the connection its minion uses, its place from 1, ConnKind
+	// that connection's kind, ConnCount how many it has, and ConnChanges
 	// the moves the minion reported, most recent first.
 	Conn        int                 `json:"conn,omitempty"`
 	ConnKind    string              `json:"conn_kind,omitempty"`
-	ConnName    string              `json:"conn_name,omitempty"`
 	ConnCount   int                 `json:"conn_count,omitempty"`
 	ConnChanges []SessionConnChange `json:"conn_changes,omitempty"`
 	// Connections are the minion's own, when its hello said them (Conn is a
@@ -373,7 +372,6 @@ type SessionConnChange struct {
 type SessionConnection struct {
 	Channel      string         `json:"channel"`
 	Kind         string         `json:"kind"`
-	Name         string         `json:"name"`
 	Version      uint64         `json:"version,omitempty"`
 	Params       map[string]any `json:"params,omitempty"`
 	Values       map[string]any `json:"values,omitempty"`
@@ -668,8 +666,6 @@ func (s SessionRecord) Validate() error {
 			return fmt.Errorf("connections[%d]: channel must be 1..64 characters without spaces", i)
 		case !KnownKind(c.Kind):
 			return fmt.Errorf("connections[%d]: kind %q is not a connection kind", i, c.Kind)
-		case c.Name == "":
-			return fmt.Errorf("connections[%d]: name is required", i)
 		}
 	}
 	for i, r := range s.Restarts {
